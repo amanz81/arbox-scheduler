@@ -30,6 +30,17 @@ func TestParseMorningArgs_both(t *testing.T) {
 	}
 }
 
+func TestParseMorningArgs_weekAlias(t *testing.T) {
+	s, e, d, err := parseMorningArgs([]string{"week"}, 6, 12, 7)
+	if err != nil || s != 6 || e != 12 || d != 7 {
+		t.Fatalf("got %d %d %d err=%v", s, e, d, err)
+	}
+	s, e, d, err = parseMorningArgs([]string{"8-10", "w"}, 6, 12, 7)
+	if err != nil || s != 8 || e != 10 || d != 7 {
+		t.Fatalf("got %d %d %d err=%v", s, e, d, err)
+	}
+}
+
 func TestParseMorningArgs_invalid(t *testing.T) {
 	if _, _, _, err := parseMorningArgs([]string{"10-8"}, 6, 12, 7); err == nil {
 		t.Fatalf("want error for inverted range")

@@ -14,14 +14,19 @@ import (
 // parseMorningArgs accepts up to two args in any order:
 //   - "HH-HH" (e.g. "8-10", "06-12") — start/end hour window
 //   - "N"    (e.g. "3", "7")         — days to look ahead (1..30)
-// Defaults are returned when an arg is missing.
+//   - "week" / "w"                   — alias for 7 days
+// Defaults: defStart..defEnd over 1 day.
 func parseMorningArgs(args []string, defStart, defEnd, defDays int) (startH, endH, days int, err error) {
-	// /morning with no args = next single day (tomorrow), default window.
 	startH, endH, days = defStart, defEnd, 1
 	_ = defDays
 	for _, a := range args {
 		a = strings.TrimSpace(a)
 		if a == "" {
+			continue
+		}
+		switch strings.ToLower(a) {
+		case "week", "w":
+			days = 7
 			continue
 		}
 		if strings.Contains(a, "-") {
@@ -49,10 +54,16 @@ func parseMorningArgs(args []string, defStart, defEnd, defDays int) (startH, end
 	return startH, endH, days, nil
 }
 
-// buildMorningReport returns a compact per-day listing of classes whose start
-// time is in [startH:00, endH:00). The global category_filter is applied so
-// the gym's Open Box / kids / etc. are excluded.
+// buildMorningReport — compatibility wrapper kept for tests/callers; see
+// buildClassWindowReport.
 func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, startH, endH, days int) (string, error) {
+	return buildClassWindowReport(ctx, c, client, locID, startH, endH, days)
+}
+
+// buildClassWindowReport returns a compact per-day listing of classes whose
+// start time is in [startH:00, endH:00). The global category_filter is applied
+// so the gym's Open Box / kids / etc. are excluded.
+func buildClassWindowReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, startH, endH, days int) (string, error) {
 	loc, now, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
 	if err != nil {
 		return "", err

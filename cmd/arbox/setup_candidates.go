@@ -81,10 +81,14 @@ func buildSetupCandidates(ctx context.Context, cfg *config.Config, client *arbox
 				continue
 			}
 			seen[key] = true
+			// Strip the gym's noisy prefix so labels fit in narrow Telegram
+			// buttons (e.g. "CrossFit- Hall A" -> "Hall A", "Crossfit Hall B"
+			// -> "Hall B"). Shorter labels render fully on mobile.
+			short := shortenCategoryForButton(name)
 			row = append(row, setupCandidate{
 				Time:     cl.Time,
 				Category: name,
-				Label:    fmt.Sprintf("%s · %s", cl.Time, truncateRunes(name, 40)),
+				Label:    fmt.Sprintf("%s %s", hhmm(cl.Time), truncateRunes(short, 28)),
 			})
 		}
 		sort.Slice(row, func(i, j int) bool {
@@ -106,4 +110,17 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max-1]) + "…"
+}
+
+// shortenCategoryForButton drops common gym prefixes ("CrossFit- ", "Crossfit ")
+// so the button text leads with the meaningful part (e.g. "Hall A").
+func shortenCategoryForButton(name string) string {
+	s := strings.TrimSpace(name)
+	low := strings.ToLower(s)
+	for _, p := range []string{"crossfit- ", "crossfit-", "crossfit "} {
+		if strings.HasPrefix(low, p) {
+			return strings.TrimSpace(s[len(p):])
+		}
+	}
+	return s
 }

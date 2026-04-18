@@ -787,7 +787,9 @@ func summarizePlanOptionsLive(opts []config.ClassOption, classes []arboxapi.Clas
 	return fmt.Sprintf("%s — %s", strings.Join(names, " then "), reason)
 }
 
-// buildWeeklyAvailableReport is for Telegram /weeklyavailable: live schedule vs plan (longer).
+// buildWeeklyAvailableReport — kept so any external import or future linkage
+// still resolves; not wired to any Telegram command. Use /morning week and
+// /evening week for the day-by-day live views.
 func buildWeeklyAvailableReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
 	loc, now, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
 	if err != nil {

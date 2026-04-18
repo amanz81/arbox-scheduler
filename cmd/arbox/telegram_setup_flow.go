@@ -99,6 +99,10 @@ func handleTelegramSetup(ctx context.Context, hc *http.Client, base string, chat
 	return tgSendMessage(ctx, hc, base, chatID, foot, 0)
 }
 
+// setupButtonsPerRow controls keyboard width. Narrow phones truncate text
+// when too many buttons share a row; 2 keeps labels fully readable.
+const setupButtonsPerRow = 2
+
 // buildSetupInlineKeyboard returns Telegram inline_keyboard rows; button text
 // is capped at 64 chars. prefix shows selection state (✓ / ○).
 func buildSetupInlineKeyboard(dayKey string, row []setupCandidate, picks []int) ([][]map[string]string, error) {
@@ -122,7 +126,7 @@ func buildSetupInlineKeyboard(dayKey string, row []setupCandidate, picks []int) 
 			"callback_data": cb,
 		}
 		cur = append(cur, btn)
-		if len(cur) >= 4 {
+		if len(cur) >= setupButtonsPerRow {
 			kb = append(kb, cur)
 			cur = nil
 		}

@@ -121,17 +121,24 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Status", rep); err != nil {
 					fmt.Printf("[telegram-bot] send status: %v\n", err)
 				}
-			case "/weeklyavailable":
-				rep, err := buildWeeklyAvailableReport(ctx, cfg, client, locID, lookaheadDays)
+			case "/evening":
+				startH, endH, days, parseErr := parseMorningArgs(args, 16, 22, 1)
+				if parseErr != nil {
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+						"*Evening*\n"+notify.EscapeMarkdownV2(parseErr.Error()+"\nUsage: /evening [HH-HH] [days|week]"),
+						msg.MessageID)
+					continue
+				}
+				rep, err := buildClassWindowReport(ctx, cfg, client, locID, startH, endH, days)
 				if err != nil {
-					out := "*Weekly available*\n" + notify.EscapeMarkdownV2("Error: "+err.Error())
+					out := "*Evening*\n" + notify.EscapeMarkdownV2("Error: "+err.Error())
 					if sendErr := tgSendMessage(ctx, hc, base, msg.Chat.ID, out, msg.MessageID); sendErr != nil {
-						fmt.Printf("[telegram-bot] send weekly error reply: %v\n", sendErr)
+						fmt.Printf("[telegram-bot] send evening error reply: %v\n", sendErr)
 					}
 					continue
 				}
-				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Weekly available", rep); err != nil {
-					fmt.Printf("[telegram-bot] send weekly: %v\n", err)
+				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Evening", rep); err != nil {
+					fmt.Printf("[telegram-bot] send evening: %v\n", err)
 				}
 			case "/pause":
 				loc := cfg.Location()
@@ -203,7 +210,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				}
 			default:
 				h := "*Unknown command*\n" + notify.EscapeMarkdownV2(
-					"Try /start, /help, /status, /morning, /weeklyavailable, /setup, /setupdone, /setupcancel, /pause, /resume, /version.")
+					"Try /start, /help, /status, /morning, /evening, /setup, /setupdone, /setupcancel, /pause, /resume, /version.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -212,7 +219,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days] — live classes per day (default 06-12, 1 day). /weeklyavailable — next-week live schedule vs plan. /setup + /setupdone save user_plan.yaml. /pause [Nh|Nd|until DATE] + /resume control auto-booking. /version shows deployed build + gym + TZ.")
+	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days|week] — live classes (default 06-12, 1 day; e.g. /morning week). /evening [HH-HH] [days|week] — same for evenings (default 16-22). /setup + /setupdone save user_plan.yaml. /pause [Nh|Nd|until DATE] + /resume control auto-booking. /version shows deployed build + gym + TZ.")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
@@ -252,8 +259,8 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 			{"command": "start", "description": "About this bot"},
 			{"command": "help", "description": "List commands"},
 			{"command": "status", "description": "Selections + your bookings"},
-			{"command": "morning", "description": "Morning classes per day [HH-HH] [days]"},
-			{"command": "weeklyavailable", "description": "Next week live vs plan"},
+			{"command": "morning", "description": "Morning classes [HH-HH] [days|week]"},
+			{"command": "evening", "description": "Evening classes [HH-HH] [days|week]"},
 			{"command": "pause", "description": "Pause auto-booking [Nh|Nd|until DATE]"},
 			{"command": "resume", "description": "Resume auto-booking"},
 			{"command": "version", "description": "Show deployed version + gym + TZ"},
