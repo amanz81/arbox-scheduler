@@ -463,21 +463,45 @@ func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Cla
 	b.WriteByte('\n')
 }
 
+// fetchScheduleWindow pulls one Arbox call per requested calendar day and
+// re-buckets every returned class by its **own `class.Date`** field. That way
+// any API quirk (returning more days than requested, or returning the
+// neighbouring day due to TZ rounding) lands the row under the right key, so
+// "Sun lookup" never accidentally shows a Sat class.
 func fetchScheduleWindow(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (*time.Location, time.Time, time.Time, map[string][]arboxapi.Class, error) {
 	loc := c.Location()
 	now := time.Now().In(loc)
 	windowStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	allBy := make(map[string][]arboxapi.Class)
+	seen := make(map[int]bool)
 	for i := 0; i < days; i++ {
 		d := windowStart.AddDate(0, 0, i)
 		key := d.Format("2006-01-02")
+		if _, ok := allBy[key]; !ok {
+			allBy[key] = []arboxapi.Class{}
+		}
 		ctx2, cancel := context.WithTimeout(ctx, 20*time.Second)
 		classes, err := client.GetScheduleDay(ctx2, d, locID)
 		cancel()
 		if err != nil {
 			return nil, time.Time{}, time.Time{}, nil, fmt.Errorf("fetch %s: %w", key, err)
 		}
-		allBy[key] = classes
+		for _, cl := range classes {
+			if cl.ID != 0 && seen[cl.ID] {
+				continue
+			}
+			classKey := strings.TrimSpace(cl.Date)
+			if i := strings.Index(classKey, "T"); i > 0 {
+				classKey = classKey[:i]
+			}
+			if classKey == "" {
+				classKey = key
+			}
+			allBy[classKey] = append(allBy[classKey], cl)
+			if cl.ID != 0 {
+				seen[cl.ID] = true
+			}
+		}
 	}
 	return loc, now, windowStart, allBy, nil
 }

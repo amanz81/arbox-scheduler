@@ -262,19 +262,19 @@ func (c *Client) GetSchedule(ctx context.Context, from, to time.Time, locationsB
 	return out, nil
 }
 
-// GetScheduleDay fetches a single day's classes. Use this when the API turns
-// out to only return one day at a time regardless of `to`.
+// GetScheduleDay fetches a single day's classes by sending the calendar date
+// as midnight in **UTC** (i.e. `YYYY-MM-DDT00:00:00.000Z`). That mirrors the
+// reference auto-enroll-arbox implementation; sending midnight in the member's
+// local timezone caused off-by-one errors (Israel midnight = previous-day
+// 21:00 UTC and the API would return the wrong calendar day).
+//
+// `day` is read as a calendar date (year/month/day in its own Location) so
+// callers can pass either UTC midnight or a local-time value with the same
+// y/m/d.
 func (c *Client) GetScheduleDay(ctx context.Context, day time.Time, locationsBoxID int) ([]Class, error) {
-	// Use midnight in the *same location* as `day` so the calendar date (y,m,d)
-	// matches the member's box timezone. Converting y,m,d to UTC midnight was
-	// wrong (off-by-one vs local days) and led to empty or mismatched classes.
 	y, m, d := day.Date()
-	loc := day.Location()
-	if loc == nil {
-		loc = time.UTC
-	}
-	midnight := time.Date(y, m, d, 0, 0, 0, 0, loc)
-	return c.GetSchedule(ctx, midnight, midnight, locationsBoxID)
+	midnightUTC := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return c.GetSchedule(ctx, midnightUTC, midnightUTC, locationsBoxID)
 }
 
 // -----------------------------------------------------------------------------
