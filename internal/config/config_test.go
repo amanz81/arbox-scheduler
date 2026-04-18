@@ -178,3 +178,28 @@ days:
 		t.Errorf("exclude: %+v", c.CategoryFilter.Exclude)
 	}
 }
+
+func TestCategoryFilter_OneLineFlowStyleSplits(t *testing.T) {
+	path := writeTempConfig(t, `
+timezone: Asia/Jerusalem
+default_time: "09:00"
+category_filter:
+  include: Hall A, Hall B
+  exclude: Open, Kids
+days:
+  monday: { enabled: true, time: "08:30" }
+`)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.CategoryFilter.Include) != 2 || c.CategoryFilter.Include[0] != "Hall A" || c.CategoryFilter.Include[1] != "Hall B" {
+		t.Fatalf("include after normalize: %#v", c.CategoryFilter.Include)
+	}
+	if len(c.CategoryFilter.Exclude) != 2 {
+		t.Fatalf("exclude after normalize: %#v", c.CategoryFilter.Exclude)
+	}
+}

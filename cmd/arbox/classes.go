@@ -206,7 +206,7 @@ func filterClasses(classes []arboxapi.Class, include, exclude []string) []arboxa
 
 	out := classes[:0]
 	for _, c := range classes {
-		name := strings.ToLower(c.BoxCategories.Name)
+		name := strings.ToLower(c.ResolvedCategoryName())
 		if len(inc) > 0 {
 			match := false
 			for _, s := range inc {
@@ -256,7 +256,7 @@ func printClassesTable(classes []arboxapi.Class, loc *time.Location) {
 			you = "-"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\n",
-			c.Date, day, c.Time, c.BoxCategories.Name, coach,
+			c.Date, day, c.Time, c.ResolvedCategoryName(), coach,
 			spots, c.Free, c.StandBy, you, c.ID)
 	}
 	_ = tw.Flush()

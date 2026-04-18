@@ -72,7 +72,7 @@ func buildSetupCandidates(ctx context.Context, cfg *config.Config, client *arbox
 		seen := make(map[string]bool)
 		var row []setupCandidate
 		for _, cl := range classes {
-			name := cl.BoxCategories.Name
+			name := cl.ResolvedCategoryName()
 			if !classPassesGlobalFilter(name, cfg.CategoryFilter) {
 				continue
 			}

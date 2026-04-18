@@ -21,6 +21,9 @@ default_time: "09:00"
 # Global filter: only classes whose category contains one of `include` AND
 # none of `exclude` are considered "real candidates". Applied when an option
 # doesn't set its own `category`, and also as a safety net when it does.
+# You may use either a YAML list (below) or one comma-separated line, e.g.
+#   include: Hall A, Hall B
+# Substrings are matched against Arbox class titles (Latin or Hebrew).
 category_filter:
   include:
     - "Hall A"

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -56,6 +57,37 @@ type Class struct {
 	} `json:"coach"`
 
 	Raw map[string]any `json:"-"`
+}
+
+// ResolvedCategoryName returns the best-effort class title for filtering and
+// display. Some Arbox payloads leave box_categories.name empty but keep an
+// alternate shape in Raw.
+func (c Class) ResolvedCategoryName() string {
+	s := strings.TrimSpace(c.BoxCategories.Name)
+	if s != "" {
+		return s
+	}
+	if c.Raw == nil {
+		return ""
+	}
+	for _, k := range []string{"class_name", "lesson_name", "name", "title"} {
+		if v, ok := c.Raw[k]; ok {
+			if str, ok := v.(string); ok {
+				if t := strings.TrimSpace(str); t != "" {
+					return t
+				}
+			}
+		}
+	}
+	if v, ok := c.Raw["box_categories"]; ok {
+		switch m := v.(type) {
+		case map[string]any:
+			if n, ok := m["name"].(string); ok {
+				return strings.TrimSpace(n)
+			}
+		}
+	}
+	return ""
 }
 
 // YouStatus returns a short label for the user's relationship to this class.

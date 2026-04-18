@@ -44,6 +44,64 @@ type CategoryFilter struct {
 	Exclude []string `yaml:"exclude,omitempty"`
 }
 
+// UnmarshalYAML accepts either a YAML sequence of strings or a single
+// flow-style string like `Hall A, Hall B` (common copy-paste mistake).
+func (cf *CategoryFilter) UnmarshalYAML(n *yaml.Node) error {
+	*cf = CategoryFilter{}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		kn := n.Content[i]
+		vn := n.Content[i+1]
+		if kn.Kind != yaml.ScalarNode {
+			continue
+		}
+		switch kn.Value {
+		case "include":
+			cf.Include = flattenYAMLStringList(vn)
+		case "exclude":
+			cf.Exclude = flattenYAMLStringList(vn)
+		}
+	}
+	return nil
+}
+
+func flattenYAMLStringList(node *yaml.Node) []string {
+	if node == nil || node.Kind == 0 {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		s := strings.TrimSpace(node.Value)
+		if s == "" {
+			return nil
+		}
+		if !strings.Contains(s, ",") {
+			return []string{s}
+		}
+		var out []string
+		for _, p := range strings.Split(s, ",") {
+			if t := strings.TrimSpace(p); t != "" {
+				out = append(out, t)
+			}
+		}
+		return out
+	case yaml.SequenceNode:
+		var out []string
+		for _, c := range node.Content {
+			if c.Kind == yaml.ScalarNode {
+				if t := strings.TrimSpace(c.Value); t != "" {
+					out = append(out, t)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 type Config struct {
 	Timezone       string               `yaml:"timezone"`
 	DefaultTime    string               `yaml:"default_time,omitempty"`
