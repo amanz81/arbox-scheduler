@@ -91,11 +91,12 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 			if !strings.HasPrefix(text, "/") {
 				continue
 			}
-			cmd, _, _ := strings.Cut(text, " ")
+			cmd, rest, _ := strings.Cut(text, " ")
 			cmd = strings.ToLower(cmd)
 			if i := strings.IndexByte(cmd, '@'); i >= 0 {
 				cmd = cmd[:i]
 			}
+			args := strings.Fields(rest)
 
 			cfg, err := cfgReload()
 			if err != nil {
@@ -132,6 +133,25 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Weekly available", rep); err != nil {
 					fmt.Printf("[telegram-bot] send weekly: %v\n", err)
 				}
+			case "/morning":
+				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, lookaheadDays)
+				if parseErr != nil {
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+						"*Morning*\n"+notify.EscapeMarkdownV2(parseErr.Error()+"\nUsage: /morning [HH-HH] [days]"),
+						msg.MessageID)
+					continue
+				}
+				rep, err := buildMorningReport(ctx, cfg, client, locID, startH, endH, days)
+				if err != nil {
+					out := "*Morning*\n" + notify.EscapeMarkdownV2("Error: "+err.Error())
+					if sendErr := tgSendMessage(ctx, hc, base, msg.Chat.ID, out, msg.MessageID); sendErr != nil {
+						fmt.Printf("[telegram-bot] send morning error reply: %v\n", sendErr)
+					}
+					continue
+				}
+				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Morning", rep); err != nil {
+					fmt.Printf("[telegram-bot] send morning: %v\n", err)
+				}
 			case "/setup":
 				if err := handleTelegramSetup(ctx, hc, base, msg.Chat.ID, msg.MessageID, cfg, client, locID); err != nil {
 					e := "*Setup failed*\n" + notify.EscapeMarkdownV2(err.Error())
@@ -151,7 +171,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				}
 			default:
 				h := "*Unknown command*\n" + notify.EscapeMarkdownV2(
-					"Try /start, /help, /status, /weeklyavailable, /setup, /setupdone, or /setupcancel.")
+					"Try /start, /help, /status, /morning, /weeklyavailable, /setup, /setupdone, or /setupcancel.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -160,7 +180,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /weeklyavailable — next-week live schedule vs plan (longer). /setup + /setupdone save user_plan.yaml on the server.")
+	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days] — live classes per day (default 06-12, 7 days). /weeklyavailable — next-week live schedule vs plan. /setup + /setupdone save user_plan.yaml on the server.")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
@@ -200,6 +220,7 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 			{"command": "start", "description": "About this bot"},
 			{"command": "help", "description": "List commands"},
 			{"command": "status", "description": "Selections + your bookings"},
+			{"command": "morning", "description": "Morning classes per day [HH-HH] [days]"},
 			{"command": "weeklyavailable", "description": "Next week live vs plan"},
 			{"command": "setup", "description": "Pick week from real Arbox classes"},
 			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
