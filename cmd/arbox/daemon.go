@@ -12,6 +12,7 @@ import (
 
 	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
 	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/amanz81/arbox-scheduler/internal/notify"
 	"github.com/amanz81/arbox-scheduler/internal/schedule"
 )
 
@@ -41,6 +42,10 @@ Current behavior (heartbeat-only, no real bookings yet):
   - Every --interval, log the next planned option and countdown.
   - Re-auths silently when the access token expires.
   - Exits cleanly on SIGINT / SIGTERM.
+  - If TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set, sends Telegram:
+      · one *online* message on boot
+      · one *heartbeat* per calendar day (local TZ) with next-window summary
+      · one *shutdown* message on SIGTERM
 
 Designed as the container CMD on Fly.io.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,6 +56,11 @@ Designed as the container CMD on Fly.io.`,
 			client, _, err := newAuthedClient(cmd.Context())
 			if err != nil {
 				return err
+			}
+
+			notifier, warns := notify.FromEnv()
+			for _, w := range warns {
+				fmt.Println("[notify]", w)
 			}
 
 			// Signal-aware context for clean shutdown.
@@ -66,21 +76,46 @@ Designed as the container CMD on Fly.io.`,
 				return fmt.Errorf("initial locations discovery: %w", err)
 			}
 
-			// First tick immediately, then every `interval`.
-			if err := tick(ctx, cfg, client, locID, lookaheadDays); err != nil {
+			loc := cfg.Location()
+			// At most one Telegram heartbeat per local calendar day (not on the
+			// same deploy minute as EventOnline — that message already proves life).
+			lastHeartbeatDay := time.Now().In(loc).Format("2006-01-02")
+
+			// First tick immediately (stdout always); fold summary into *online*.
+			summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
+			if err != nil {
 				fmt.Printf("[daemon] tick error: %v\n", err)
+				_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: err.Error()})
 			}
+			onlineText := fmt.Sprintf(
+				"version `%s`\ninterval `%s`\nlookahead `%dd`\ntz `%s`",
+				Version, interval.String(), lookaheadDays, cfg.Timezone)
+			if summary != "" && err == nil {
+				onlineText += "\n" + summary
+			}
+			if err := notifier.Notify(notify.Message{Event: notify.EventOnline, Text: onlineText}); err != nil {
+				fmt.Printf("[notify] online message: %v\n", err)
+			}
+
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ctx.Done():
 					fmt.Println("[daemon] shutdown requested — goodbye")
+					_ = notifier.Notify(notify.Message{
+						Event: notify.EventShutdown,
+						Text:  "received SIGINT/SIGTERM",
+					})
 					return nil
 				case <-ticker.C:
-					if err := tick(ctx, cfg, client, locID, lookaheadDays); err != nil {
+					summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
+					if err != nil {
 						fmt.Printf("[daemon] tick error: %v\n", err)
+						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: err.Error()})
+						continue
 					}
+					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary)
 				}
 			}
 		},
@@ -92,11 +127,32 @@ Designed as the container CMD on Fly.io.`,
 	return cmd
 }
 
+// maybeDailyHeartbeat sends at most one EventHeartbeat per local calendar day.
+func maybeDailyHeartbeat(n notify.Notifier, loc *time.Location, lastDay *string, summary string) {
+	now := time.Now().In(loc)
+	day := now.Format("2006-01-02")
+	if day == *lastDay {
+		return
+	}
+	*lastDay = day
+	if summary == "" {
+		summary = "no summary"
+	}
+	_ = n.Notify(notify.Message{
+		Event: notify.EventHeartbeat,
+		Text:  summary,
+		When:  now,
+	})
+}
+
 // tick runs one heartbeat iteration: resolve planned options, print the
 // next window countdown. Uses `client` to exercise the auth path so an
 // expired token will trigger silent re-login here rather than at booking
 // time.
-func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locID, days int) error {
+//
+// summary is a single-line MarkdownV2-safe plain string (gets escaped by
+// the notifier) suitable for the daily Telegram heartbeat.
+func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locID, days int) (summary string, err error) {
 	loc := cfg.Location()
 	now := time.Now().In(loc)
 	fmt.Printf("[tick] %s  locations_box_id=%d\n",
@@ -104,11 +160,11 @@ func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locI
 
 	opts, err := schedule.NextOptions(cfg, now, days)
 	if err != nil {
-		return fmt.Errorf("resolve options: %w", err)
+		return "", fmt.Errorf("resolve options: %w", err)
 	}
 	if len(opts) == 0 {
 		fmt.Printf("  (no planned options in the next %d days)\n", days)
-		return nil
+		return fmt.Sprintf("alive · no planned options in the next %d days", days), nil
 	}
 
 	// Fetch today's classes just to exercise the auth path and catch a
@@ -131,11 +187,18 @@ func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locI
 	}
 	if next == nil {
 		fmt.Println("  (all lookahead windows are already open)")
-		return nil
+		return "alive · all booking windows in lookahead are already open", nil
 	}
 	fmt.Printf("  next window opens in %s @ %s — %s %s (pri=%d, cat=%q)\n",
 		next.WindowOpen.Sub(now).Round(time.Second),
 		next.WindowOpen.Format("2006-01-02 15:04 MST"),
 		next.Weekday, next.Time, next.Priority, next.Category)
-	return nil
+
+	summary = fmt.Sprintf(
+		"alive · next in %s · window %s · %s %s · pri %d · %s",
+		next.WindowOpen.Sub(now).Round(time.Second),
+		next.WindowOpen.Format("Mon 02 Jan 15:04"),
+		next.Weekday, next.Time,
+		next.Priority, next.Category)
+	return summary, nil
 }

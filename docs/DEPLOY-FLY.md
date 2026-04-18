@@ -63,10 +63,47 @@ fly secrets set \
   ARBOX_PASSWORD='your-arbox-password'
 ```
 
-That's all the secrets you need. On first boot the daemon will call
-`/api/v2/user/login` using them, discover your box + locations, and write
-the access/refresh tokens to `/data/.env`. From then on only the refresh
-token is used to stay logged in.
+On first boot the daemon will call `/api/v2/user/login` using them,
+discover your box + locations, and write the access/refresh tokens to
+`/data/.env`. From then on only the refresh token is used to stay logged in.
+
+---
+
+## 3b. Telegram (optional — outbound notifications only)
+
+The daemon does **not** run a Telegram webhook server. `/start` in the bot
+does nothing until **you** tell Fly your numeric `chat_id` and the bot
+token — then the daemon calls `sendMessage` **to you** (MarkdownV2).
+
+### Get your `chat_id`
+
+1. Put the bot token from @BotFather in your local `.env` (never commit it):
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456:ABC...
+   ```
+
+2. Open your bot in Telegram and tap **Start** (or send any message).
+
+3. From the repo root:
+
+   ```bash
+   go run ./cmd/arbox telegram discover
+   ```
+
+   It prints a line like `chat_id=123456789 ...`
+
+4. Add **both** secrets on Fly (web UI → your app → **Secrets**, or `fly secrets set`):
+
+   - `TELEGRAM_BOT_TOKEN` — same value as in `.env`
+   - `TELEGRAM_CHAT_ID` — the integer from step 3
+
+5. Push a new deploy (or wait for the next GitHub Actions run after `git push`).
+   On boot you should get one **online** message with version + first tick
+   summary; after that, at most one **heartbeat** per local calendar day.
+
+If you ever pasted the bot token in a chat, rotate it in @BotFather with
+`/revoke` and update the Fly secret.
 
 ---
 
