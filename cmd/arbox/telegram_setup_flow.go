@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
 	"github.com/amanz81/arbox-scheduler/internal/config"
@@ -69,14 +70,21 @@ func handleTelegramSetup(ctx context.Context, hc *http.Client, base string, chat
 		return err
 	}
 
-	head := "*Weekly setup*\n" + notify.EscapeMarkdownV2(
-		"Each message below is one weekday. Buttons are real classes from Arbox (next occurrence of that weekday). "+
-			"✓ = selected for your plan, ○ = not selected (buttons update when you tap). "+
-			"When you open /setup, ✓ marks are filled from your current saved plan when times/categories match. "+
-			"Tap to toggle. First tap = highest priority for that day. "+
-			"Send /setupdone to write user_plan.yaml on the server, or /setupcancel to discard this session.")
-
-	_ = tgSendMessage(ctx, hc, base, chatID, head, replyTo)
+	// Single legend at the top — applies to every day below.
+	headLines := []string{
+		"*Weekly setup*",
+		"",
+		notify.EscapeMarkdownV2("Buttons below are real Arbox classes for the next occurrence of each weekday."),
+		"",
+		notify.EscapeMarkdownV2("Legend:"),
+		notify.EscapeMarkdownV2("  ✓  selected — daemon may book this slot"),
+		notify.EscapeMarkdownV2("  ○  off — ignored (a day with all ○ becomes a rest day)"),
+		"",
+		notify.EscapeMarkdownV2("Order: first tap = top priority. Existing ✓ are seeded from your saved plan."),
+		"",
+		notify.EscapeMarkdownV2("Finish: /setupdone to save · /setupcancel to discard."),
+	}
+	_ = tgSendMessage(ctx, hc, base, chatID, strings.Join(headLines, "\n"), replyTo)
 
 	for _, dayKey := range setupWeekdayOrder {
 		row, ok := cands[dayKey]
@@ -87,16 +95,35 @@ func handleTelegramSetup(ctx context.Context, hc *http.Client, base string, chat
 		if kbErr != nil {
 			return kbErr
 		}
-		title := "*" + notify.EscapeMarkdownV2(prettyDayKey(dayKey)) + "*\n" +
-			notify.EscapeMarkdownV2("✓ on = daemon may book this slot. ○ off = ignored. Saving with every slot ○ on a day makes that weekday a rest day (no auto-booking).")
+		title := "*" + notify.EscapeMarkdownV2(prettyDayKey(dayKey)) + "*"
+		if dateLabel := nextWeekdayDateLabel(dayKey, cfg); dateLabel != "" {
+			title += "  " + notify.EscapeMarkdownV2("· "+dateLabel)
+		}
 		if err := tgSendMessageWithKeyboard(ctx, hc, base, chatID, title, 0, kb); err != nil {
 			return err
 		}
 	}
-	foot := "*Next steps*\n" + notify.EscapeMarkdownV2(
-		"/setupdone — save checked slots to user_plan.yaml (only the weekdays shown above are updated). "+
-			"/setupcancel — throw away this session without changing the file.")
-	return tgSendMessage(ctx, hc, base, chatID, foot, 0)
+	return nil
+}
+
+// nextWeekdayDateLabel returns "Sun 19 Apr"-style text for the next occurrence
+// of dayKey in the user's timezone, used as a subtle subtitle next to the
+// weekday name in setup. Returns "" if the day key is unknown.
+func nextWeekdayDateLabel(dayKey string, cfg *config.Config) string {
+	wd, ok := dayKeyToWeekday[strings.ToLower(dayKey)]
+	if !ok {
+		return ""
+	}
+	loc := cfg.Location()
+	now := time.Now().In(loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	for i := 0; i < 14; i++ {
+		d := start.AddDate(0, 0, i)
+		if d.Weekday() == wd {
+			return d.Format("02 Jan")
+		}
+	}
+	return ""
 }
 
 // setupButtonsPerRow controls keyboard width. Narrow phones truncate text
