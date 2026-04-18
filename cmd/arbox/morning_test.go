@@ -4,14 +4,14 @@ import "testing"
 
 func TestParseMorningArgs_defaults(t *testing.T) {
 	s, e, d, err := parseMorningArgs(nil, 6, 12, 7)
-	if err != nil || s != 6 || e != 12 || d != 7 {
+	if err != nil || s != 6 || e != 12 || d != 1 {
 		t.Fatalf("got %d %d %d err=%v", s, e, d, err)
 	}
 }
 
 func TestParseMorningArgs_range(t *testing.T) {
 	s, e, d, err := parseMorningArgs([]string{"8-10"}, 6, 12, 7)
-	if err != nil || s != 8 || e != 10 || d != 7 {
+	if err != nil || s != 8 || e != 10 || d != 1 {
 		t.Fatalf("got %d %d %d err=%v", s, e, d, err)
 	}
 }

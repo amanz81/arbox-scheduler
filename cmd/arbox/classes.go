@@ -262,27 +262,67 @@ func printClassesTable(classes []arboxapi.Class, loc *time.Location) {
 	_ = tw.Flush()
 }
 
-// ensureLocationsBoxID returns ARBOX_LOCATIONS_BOX_ID from env if set,
-// otherwise discovers it via /boxes/locations and saves both IDs to .env.
+// ensureLocationsBoxID returns the locations_box_id to use.
+//
+// Resolution order:
+//  1. If config.gym is set: ALWAYS re-discover and pick the box+location whose
+//     name (or location name) contains that substring (case-insensitive). Saves
+//     both IDs back to .env. This corrects a stale env value pointing to the
+//     wrong gym.
+//  2. Else if ARBOX_LOCATIONS_BOX_ID is in env: use it as-is.
+//  3. Else: discover and pick first box's first location (legacy behavior).
 func ensureLocationsBoxID(ctx context.Context, client *arboxapi.Client) (int, error) {
-	if s := os.Getenv("ARBOX_LOCATIONS_BOX_ID"); s != "" {
-		n, err := strconv.Atoi(s)
-		if err == nil && n > 0 {
-			return n, nil
+	gym := ""
+	if c, err := loadValidated(); err == nil {
+		gym = strings.TrimSpace(c.Gym)
+	}
+
+	if gym == "" {
+		if s := os.Getenv("ARBOX_LOCATIONS_BOX_ID"); s != "" {
+			n, err := strconv.Atoi(s)
+			if err == nil && n > 0 {
+				return n, nil
+			}
 		}
 	}
+
 	locs, err := client.GetLocations(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if len(locs) == 0 || len(locs[0].LocationsBox) == 0 {
+	if len(locs) == 0 {
 		return 0, fmt.Errorf("could not discover locations_box_id from /boxes/locations")
+	}
+	gymLower := strings.ToLower(gym)
+	if gymLower != "" {
+		for _, b := range locs {
+			boxMatch := strings.Contains(strings.ToLower(b.BoxName), gymLower)
+			for _, l := range b.LocationsBox {
+				if boxMatch || strings.Contains(strings.ToLower(l.Name), gymLower) {
+					_ = envfile.Upsert(defaultEnvPath(), "ARBOX_BOX_ID", strconv.Itoa(b.BoxID))
+					_ = envfile.Upsert(defaultEnvPath(), "ARBOX_LOCATIONS_BOX_ID", strconv.Itoa(l.ID))
+					fmt.Fprintf(os.Stderr, "[discover] gym=%q matched box=%s (%d), location=%s (%d) — saved to %s\n",
+						gym, b.BoxName, b.BoxID, l.Name, l.ID, defaultEnvPath())
+					return l.ID, nil
+				}
+			}
+		}
+		var avail []string
+		for _, b := range locs {
+			for _, l := range b.LocationsBox {
+				avail = append(avail, fmt.Sprintf("%s / %s", b.BoxName, l.Name))
+			}
+		}
+		return 0, fmt.Errorf("config.gym %q matched none of: %s", gym, strings.Join(avail, "; "))
+	}
+	if len(locs[0].LocationsBox) == 0 {
+		return 0, fmt.Errorf("first box %q has no locations_box", locs[0].BoxName)
 	}
 	box := locs[0]
 	loc := box.LocationsBox[0]
 	_ = envfile.Upsert(defaultEnvPath(), "ARBOX_BOX_ID", strconv.Itoa(box.BoxID))
 	_ = envfile.Upsert(defaultEnvPath(), "ARBOX_LOCATIONS_BOX_ID", strconv.Itoa(loc.ID))
-	fmt.Fprintf(os.Stderr, "[discover] box=%s (%d), location=%s (%d) — saved to %s\n",
+	fmt.Fprintf(os.Stderr, "[discover] box=%s (%d), location=%s (%d) — saved to %s (set `gym:` in config to disambiguate)\n",
 		box.BoxName, box.BoxID, loc.Name, loc.ID, defaultEnvPath())
 	return loc.ID, nil
 }

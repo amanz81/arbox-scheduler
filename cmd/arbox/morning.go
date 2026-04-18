@@ -16,7 +16,9 @@ import (
 //   - "N"    (e.g. "3", "7")         — days to look ahead (1..30)
 // Defaults are returned when an arg is missing.
 func parseMorningArgs(args []string, defStart, defEnd, defDays int) (startH, endH, days int, err error) {
-	startH, endH, days = defStart, defEnd, defDays
+	// /morning with no args = next single day (tomorrow), default window.
+	startH, endH, days = defStart, defEnd, 1
+	_ = defDays
 	for _, a := range args {
 		a = strings.TrimSpace(a)
 		if a == "" {
@@ -47,9 +49,9 @@ func parseMorningArgs(args []string, defStart, defEnd, defDays int) (startH, end
 	return startH, endH, days, nil
 }
 
-// buildMorningReport returns a per-day listing of classes whose start time is
-// in [startH:00, endH:00). No category_filter is applied — this is a raw
-// "what's actually on the schedule" view, with your booking flag.
+// buildMorningReport returns a compact per-day listing of classes whose start
+// time is in [startH:00, endH:00). The global category_filter is applied so
+// the gym's Open Box / kids / etc. are excluded.
 func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, startH, endH, days int) (string, error) {
 	loc, now, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
 	if err != nil {
@@ -59,7 +61,8 @@ func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.
 	endMin := endH * 60
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Live Arbox classes %02d:00–%02d:00 (next %d days, %s):\n", startH, endH, days, c.Timezone)
+	fmt.Fprintf(&b, "Now: %s (%s)\n", now.Format("Mon 02 Jan 15:04 MST"), c.Timezone)
+	fmt.Fprintf(&b, "%02d:00–%02d:00, next %d day(s), filter applied.\n", startH, endH, days)
 
 	any := false
 	for i := 0; i < days; i++ {
@@ -67,6 +70,9 @@ func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.
 		key := d.Format("2006-01-02")
 		var rows []arboxapi.Class
 		for _, cl := range allBy[key] {
+			if !classPassesGlobalFilter(cl.ResolvedCategoryName(), c.CategoryFilter) {
+				continue
+			}
 			t := hhmm(cl.Time)
 			m, ok := parseHHMMMinutes(t)
 			if !ok {
@@ -75,7 +81,6 @@ func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.
 			if m < startMin || m >= endMin {
 				continue
 			}
-			// Drop classes already started today; keep all on later days.
 			if i == 0 {
 				when, errw := classStartsAt(cl, key, loc)
 				if errw == nil && !when.After(now) {
@@ -91,32 +96,27 @@ func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.
 			return hhmm(rows[i].Time) < hhmm(rows[j].Time)
 		})
 		any = true
-		fmt.Fprintf(&b, "\n%s %s:\n", d.Weekday().String()[:3], key)
+		fmt.Fprintf(&b, "\n%s %s\n", d.Weekday().String()[:3], d.Format("02 Jan"))
 		for _, cl := range rows {
 			you := cl.YouStatus()
-			if you == "" {
-				you = "-"
+			tag := ""
+			switch you {
+			case "BOOKED":
+				tag = " — BOOKED"
+			case "WAITLIST":
+				tag = " — WAITLIST"
+			default:
+				tag = fmt.Sprintf(" — free %d", cl.Free)
 			}
-			cap := cl.MaxUsers
-			if cap <= 0 {
-				cap = cl.Registered + cl.Free
-			}
-			marker := ""
-			if you == "BOOKED" {
-				marker = "  ← your booking"
-			} else if you == "WAITLIST" {
-				marker = "  ← on waitlist"
-			}
-			fmt.Fprintf(&b, "  %s  %s  %d/%d (free %d, wl %d)  you %s  id %d%s\n",
+			fmt.Fprintf(&b, "  %s  %s%s  (id %d)\n",
 				hhmm(cl.Time),
 				cl.ResolvedCategoryName(),
-				cl.Registered, cap, cl.Free, cl.StandBy,
-				you, cl.ID, marker,
+				tag, cl.ID,
 			)
 		}
 	}
 	if !any {
-		fmt.Fprintf(&b, "(no classes returned in this window for the next %d days)\n", days)
+		fmt.Fprintf(&b, "(no classes after now in this window)\n")
 	}
 	return b.String(), nil
 }

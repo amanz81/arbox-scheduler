@@ -134,7 +134,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 					fmt.Printf("[telegram-bot] send weekly: %v\n", err)
 				}
 			case "/morning":
-				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, lookaheadDays)
+				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, 1)
 				if parseErr != nil {
 					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
 						"*Morning*\n"+notify.EscapeMarkdownV2(parseErr.Error()+"\nUsage: /morning [HH-HH] [days]"),

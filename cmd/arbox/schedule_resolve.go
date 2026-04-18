@@ -671,22 +671,90 @@ func appendPlanSelectionsSimple(b *strings.Builder, c *config.Config, allBy map[
 	}
 }
 
-// buildStatusShortReport is for Telegram /status: saved selections + Arbox bookings only.
+// buildStatusShortReport is for Telegram /status: one short line per planned weekday.
 func buildStatusShortReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
-	loc, _, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
+	loc, now, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Timezone: %s\n", c.Timezone)
-	fmt.Fprintf(&b, "All times: %s.\n\n", c.Timezone)
-	appendPlanSelectionsSimple(&b, c, allBy, windowStart, days)
-	b.WriteByte('\n')
-	writeUserBookingsSection(&b, allBy, loc, windowStart, days,
-		"Already booked in Arbox (BOOKED / WAITLIST):",
-		"If a booking is missing but shows in the Arbox app, the API may not mark this account on this endpoint.")
-	b.WriteString("\nDetails for the next week: /weeklyavailable\n")
+	fmt.Fprintf(&b, "Now: %s (%s)\n\n", now.Format("Mon 02 Jan 15:04 MST"), c.Timezone)
+	for _, dk := range setupWeekdayOrder {
+		d, ok := c.Days[dk]
+		if !ok {
+			continue
+		}
+		wd, okWD := dayKeyToWeekday[dk]
+		if !okWD {
+			continue
+		}
+		pretty := strings.ToUpper(dk[:1]) + dk[1:]
+		if !d.Enabled {
+			fmt.Fprintf(&b, "%s — rest\n", pretty)
+			continue
+		}
+		opts := c.OptionsFor(wd)
+		if len(opts) == 0 {
+			fmt.Fprintf(&b, "%s — (no options)\n", pretty)
+			continue
+		}
+		key := nextOccurrenceKey(windowStart, wd, days)
+		datePart := pretty
+		if key != "" {
+			if t, err := time.ParseInLocation("2006-01-02", key, loc); err == nil {
+				datePart = t.Format("Mon 02 Jan")
+			}
+		}
+		fmt.Fprintf(&b, "%s %s — %s\n", datePart, opts[0].Time, summarizePlanOptionsLive(opts, allBy[key], c.CategoryFilter))
+	}
+	hasBooking := false
+	for _, list := range allBy {
+		for _, cl := range list {
+			if cl.YouStatus() != "" {
+				hasBooking = true
+				break
+			}
+		}
+		if hasBooking {
+			break
+		}
+	}
+	if !hasBooking {
+		b.WriteString("\nNo bookings detected on Arbox in this window.\n")
+	}
+	b.WriteString("\nMore: /morning [HH-HH] [days], /weeklyavailable.\n")
 	return b.String(), nil
+}
+
+// summarizePlanOptionsLive picks the first plan tier that resolves against the
+// live day, otherwise lists tiers and a hint. Output is a single short phrase.
+func summarizePlanOptionsLive(opts []config.ClassOption, classes []arboxapi.Class, flt config.CategoryFilter) string {
+	// Find the first option that resolves to a class on this day.
+	for _, o := range opts {
+		switch lab := resolvePlanOptionAvailability(o, classes, flt); {
+		case strings.HasPrefix(lab, "available"):
+			cat := strings.TrimSpace(o.Category)
+			if cat == "" {
+				cat = "(filter)"
+			}
+			// available (id N, you BOOKED|WAITLIST|-)
+			tail := strings.TrimPrefix(lab, "available ")
+			tail = strings.TrimPrefix(tail, "(")
+			tail = strings.TrimSuffix(tail, ")")
+			return fmt.Sprintf("%s — %s", cat, tail)
+		}
+	}
+	// No tier resolved — show the priority list compactly + reason from first.
+	var names []string
+	for _, o := range opts {
+		c := strings.TrimSpace(o.Category)
+		if c == "" {
+			c = "(filter)"
+		}
+		names = append(names, c)
+	}
+	reason := resolvePlanOptionAvailability(opts[0], classes, flt)
+	return fmt.Sprintf("%s — %s", strings.Join(names, " then "), reason)
 }
 
 // buildWeeklyAvailableReport is for Telegram /weeklyavailable: live schedule vs plan (longer).

@@ -108,6 +108,11 @@ type Config struct {
 	CategoryFilter CategoryFilter       `yaml:"category_filter,omitempty"`
 	Days           map[string]DayConfig `yaml:"days"`
 
+	// Gym is an optional case-insensitive substring used to pick the right
+	// box+location when /api/v2/boxes/locations returns more than one (e.g.
+	// member of multiple gyms). Matched against box name and location name.
+	Gym string `yaml:"gym,omitempty"`
+
 	loc *time.Location
 }
 
