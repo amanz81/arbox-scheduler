@@ -461,9 +461,78 @@ func fetchScheduleWindow(ctx context.Context, c *config.Config, client *arboxapi
 	return loc, now, windowStart, allBy, nil
 }
 
-// appendPlanSelectionsSimple lists enabled-day targets as saved (no priority labels).
-func appendPlanSelectionsSimple(b *strings.Builder, c *config.Config) {
-	b.WriteString("What you selected this week (saved plan):\n")
+// nextOccurrenceKey returns the YYYY-MM-DD key of the next calendar day
+// (within `days` from windowStart) whose weekday matches `wd`. Returns "" if
+// none falls inside the window.
+func nextOccurrenceKey(windowStart time.Time, wd time.Weekday, days int) string {
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		if d.Weekday() == wd {
+			return d.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// resolvePlanOptionAvailability returns a short label for the option given the
+// classes listed for that calendar day. The returned label is one of:
+//   "available (id <n>, you BOOKED|WAITLIST|-)" — found and category matches
+//   "not on schedule"                          — that time exists but no category match
+//   "no class at this time"                    — no class at that clock time
+func resolvePlanOptionAvailability(opt config.ClassOption, classes []arboxapi.Class, flt config.CategoryFilter) string {
+	wantCat := strings.ToLower(strings.TrimSpace(opt.Category))
+	timeMatches := 0
+	for _, c := range classes {
+		if c.Time != opt.Time {
+			continue
+		}
+		timeMatches++
+		name := strings.ToLower(strings.TrimSpace(c.ResolvedCategoryName()))
+		// Apply global excludes always.
+		exHit := false
+		for _, ex := range flt.Exclude {
+			if ex != "" && strings.Contains(name, strings.ToLower(ex)) {
+				exHit = true
+				break
+			}
+		}
+		if exHit {
+			continue
+		}
+		// Per-option category if set; otherwise global include list.
+		ok := false
+		switch {
+		case wantCat != "":
+			ok = strings.Contains(name, wantCat)
+		case len(flt.Include) > 0:
+			for _, inc := range flt.Include {
+				if inc != "" && strings.Contains(name, strings.ToLower(inc)) {
+					ok = true
+					break
+				}
+			}
+		default:
+			ok = true
+		}
+		if !ok {
+			continue
+		}
+		you := c.YouStatus()
+		if you == "" {
+			you = "-"
+		}
+		return fmt.Sprintf("available (id %d, you %s)", c.ID, you)
+	}
+	if timeMatches == 0 {
+		return "no class at this time"
+	}
+	return "not on schedule"
+}
+
+// appendPlanSelectionsSimple lists enabled-day targets as saved with a short
+// availability tag for the *next* occurrence of each weekday.
+func appendPlanSelectionsSimple(b *strings.Builder, c *config.Config, allBy map[string][]arboxapi.Class, windowStart time.Time, days int) {
+	b.WriteString("What you selected this week (saved plan, with live Arbox availability):\n")
 	n := 0
 	for _, dk := range setupWeekdayOrder {
 		d, ok := c.Days[dk]
@@ -485,15 +554,19 @@ func appendPlanSelectionsSimple(b *strings.Builder, c *config.Config) {
 			fmt.Fprintf(b, "· %s: (no times)\n", pretty)
 			continue
 		}
-		var parts []string
+		key := nextOccurrenceKey(windowStart, wd, days)
+		fmt.Fprintf(b, "· %s (%s):\n", pretty, key)
 		for _, o := range opts {
-			p := o.Time
+			label := o.Time
 			if strings.TrimSpace(o.Category) != "" {
-				p += " " + strings.TrimSpace(o.Category)
+				label += " " + strings.TrimSpace(o.Category)
 			}
-			parts = append(parts, p)
+			avail := "no schedule pulled for this day"
+			if key != "" {
+				avail = resolvePlanOptionAvailability(o, allBy[key], c.CategoryFilter)
+			}
+			fmt.Fprintf(b, "    - %s — %s\n", label, avail)
 		}
-		fmt.Fprintf(b, "· %s: %s\n", pretty, strings.Join(parts, ", "))
 	}
 	if n == 0 {
 		b.WriteString("· (no days block in config)\n")
@@ -509,7 +582,7 @@ func buildStatusShortReport(ctx context.Context, c *config.Config, client *arbox
 	var b strings.Builder
 	fmt.Fprintf(&b, "Timezone: %s\n", c.Timezone)
 	fmt.Fprintf(&b, "All times: %s.\n\n", c.Timezone)
-	appendPlanSelectionsSimple(&b, c)
+	appendPlanSelectionsSimple(&b, c, allBy, windowStart, days)
 	b.WriteByte('\n')
 	writeUserBookingsSection(&b, allBy, loc, windowStart, days,
 		"Already booked in Arbox (BOOKED / WAITLIST):",

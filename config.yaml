@@ -29,7 +29,8 @@ category_filter:
     - "Hall A"
     - "Hall B"
   exclude:
-    - "Open"           # skip Open Workout / Open Box
+    - "Open Box"       # gym free-time, never auto-book
+    - "Open"           # skip Open Workout / Open Box (substring catch-all)
     # Do NOT list "Weightlifting" here if you book the Tue 09:00 WL slot:
     # that word appears in the class title and global excludes run *before*
     # per-option Hall A/B matching — the whole row becomes "(no match)".
