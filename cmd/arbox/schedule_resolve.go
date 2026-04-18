@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -130,9 +131,28 @@ that date; the booker will skip them.`,
 	return cmd
 }
 
+// hhmm normalizes a clock string to "HH:MM": trims whitespace, drops :SS, and
+// pads single-digit hours.
+func hhmm(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexByte(s, ':'); i > 0 {
+		// trim seconds if present (HH:MM:SS or HH:MM:SS.mmm)
+		if j := strings.IndexByte(s[i+1:], ':'); j >= 0 {
+			s = s[:i+1+j]
+		}
+		if i == 1 { // pad single-digit hour
+			s = "0" + s
+		}
+	}
+	return s
+}
+
 // resolveOption returns the classes from `day` that match this option.
 // Matching rules:
-//   - class.Time must equal option.Time (HH:MM).
+//   - class.Time must equal option.Time (HH:MM, normalized).
 //   - If option.Category is set: case-insensitive substring match.
 //   - Otherwise: apply global include list (substring, any).
 //   - Global exclude list is always applied.
@@ -141,8 +161,9 @@ that date; the booker will skip them.`,
 func resolveOption(opt schedule.PlannedOption, day []arboxapi.Class, flt config.CategoryFilter) []arboxapi.Class {
 	var out []arboxapi.Class
 	wantCat := strings.ToLower(strings.TrimSpace(opt.Category))
+	wantTime := hhmm(opt.Time)
 	for _, c := range day {
-		if c.Time != opt.Time {
+		if hhmm(c.Time) != wantTime {
 			continue
 		}
 		name := strings.ToLower(strings.TrimSpace(c.ResolvedCategoryName()))
@@ -476,18 +497,20 @@ func nextOccurrenceKey(windowStart time.Time, wd time.Weekday, days int) string 
 
 // resolvePlanOptionAvailability returns a short label for the option given the
 // classes listed for that calendar day. The returned label is one of:
-//   "available (id <n>, you BOOKED|WAITLIST|-)" — found and category matches
-//   "not on schedule"                          — that time exists but no category match
-//   "no class at this time"                    — no class at that clock time
+//   "available (id <n>, you BOOKED|WAITLIST|-)"      — found and category matches
+//   "not on schedule (at HH:MM: <names…>)"           — time exists but category mismatch
+//   "no class at this time (nearby times: …)"        — no class at that clock time
 func resolvePlanOptionAvailability(opt config.ClassOption, classes []arboxapi.Class, flt config.CategoryFilter) string {
 	wantCat := strings.ToLower(strings.TrimSpace(opt.Category))
-	timeMatches := 0
+	wantTime := hhmm(opt.Time)
+	var timeMatchNames []string
 	for _, c := range classes {
-		if c.Time != opt.Time {
+		if hhmm(c.Time) != wantTime {
 			continue
 		}
-		timeMatches++
-		name := strings.ToLower(strings.TrimSpace(c.ResolvedCategoryName()))
+		nameRaw := c.ResolvedCategoryName()
+		timeMatchNames = append(timeMatchNames, nameRaw)
+		name := strings.ToLower(strings.TrimSpace(nameRaw))
 		// Apply global excludes always.
 		exHit := false
 		for _, ex := range flt.Exclude {
@@ -523,10 +546,85 @@ func resolvePlanOptionAvailability(opt config.ClassOption, classes []arboxapi.Cl
 		}
 		return fmt.Sprintf("available (id %d, you %s)", c.ID, you)
 	}
-	if timeMatches == 0 {
-		return "no class at this time"
+	if len(timeMatchNames) == 0 {
+		nearby := nearbyTimes(classes, wantTime, 4)
+		if len(nearby) == 0 {
+			return "no class at this time (no classes returned for this day)"
+		}
+		return fmt.Sprintf("no class at this time (nearby times: %s)", strings.Join(nearby, ", "))
 	}
-	return "not on schedule"
+	// Show actual category names returned at that time so user can adjust filter.
+	return fmt.Sprintf("not on schedule (titles at %s: %s)", wantTime, strings.Join(uniqueStrings(timeMatchNames, 4), ", "))
+}
+
+func uniqueStrings(in []string, max int) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
+}
+
+// nearbyTimes returns up to `max` distinct HH:MM strings from `classes`,
+// sorted by absolute distance (in minutes) from `target` (HH:MM). Equal
+// distances keep schedule order.
+func nearbyTimes(classes []arboxapi.Class, target string, max int) []string {
+	tMin, ok := parseHHMMMinutes(target)
+	if !ok {
+		return nil
+	}
+	type entry struct {
+		t    string
+		dist int
+	}
+	seen := make(map[string]bool)
+	var ents []entry
+	for _, c := range classes {
+		t := hhmm(c.Time)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		cMin, ok := parseHHMMMinutes(t)
+		if !ok {
+			continue
+		}
+		d := cMin - tMin
+		if d < 0 {
+			d = -d
+		}
+		ents = append(ents, entry{t, d})
+	}
+	sort.SliceStable(ents, func(i, j int) bool { return ents[i].dist < ents[j].dist })
+	if len(ents) > max {
+		ents = ents[:max]
+	}
+	out := make([]string, 0, len(ents))
+	for _, e := range ents {
+		out = append(out, e.t)
+	}
+	return out
+}
+
+func parseHHMMMinutes(s string) (int, bool) {
+	if len(s) < 4 || s[2] != ':' {
+		return 0, false
+	}
+	h, err1 := strconv.Atoi(s[:2])
+	m, err2 := strconv.Atoi(s[3:5])
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+	return h*60 + m, true
 }
 
 // appendPlanSelectionsSimple lists enabled-day targets as saved with a short
