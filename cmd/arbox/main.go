@@ -56,6 +56,9 @@ func loadValidated() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := c.MergeDaysFromFile(userPlanOverlayPath()); err != nil {
+		return nil, err
+	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}

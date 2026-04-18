@@ -18,11 +18,11 @@ import (
 )
 
 // runTelegramCommandBot registers slash commands with Telegram and long-polls
-// getUpdates so /start, /help, and /status get replies. Only messages from
-// allowedChatID are honored (same id as TELEGRAM_CHAT_ID).
+// getUpdates. cfgReload should return the merged config (config.yaml +
+// user_plan.yaml overlay) so /status and /setup always see the latest file.
 //
-// This runs in a goroutine; it exits when ctx is cancelled.
-func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int64, cfg *config.Config, client *arboxapi.Client, locID, lookaheadDays int) {
+// Only TELEGRAM_CHAT_ID may control the bot.
+func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int64, cfgReload func() (*config.Config, error), client *arboxapi.Client, locID, lookaheadDays int) {
 	base := "https://api.telegram.org/bot" + token
 	hc := &http.Client{Timeout: 65 * time.Second}
 
@@ -51,12 +51,26 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
+
+			if cq := u.CallbackQuery; cq != nil {
+				if cq.Message == nil {
+					_ = tgAnswerCallback(ctx, hc, base, cq.ID, "internal")
+					continue
+				}
+				if cq.Message.Chat.ID != allowedChatID {
+					continue
+				}
+				if err := handleSetupCallback(ctx, hc, base, cq); err != nil {
+					fmt.Printf("[telegram-bot] callback: %v\n", err)
+				}
+				continue
+			}
+
 			msg := u.Message
 			if msg == nil {
 				continue
 			}
 			if msg.Chat.ID != allowedChatID {
-				// Only your TELEGRAM_CHAT_ID may control the bot; ignore others quietly.
 				fmt.Printf("[telegram-bot] ignoring message from chat_id=%d\n", msg.Chat.ID)
 				continue
 			}
@@ -73,6 +87,13 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				cmd = cmd[:i]
 			}
 
+			cfg, err := cfgReload()
+			if err != nil {
+				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+					"*Config error*\n"+notify.EscapeMarkdownV2(err.Error()), msg.MessageID)
+				continue
+			}
+
 			switch cmd {
 			case "/start", "/help":
 				body := helpTelegramBody()
@@ -86,8 +107,21 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				if err := tgSendMessage(ctx, hc, base, msg.Chat.ID, out, msg.MessageID); err != nil {
 					fmt.Printf("[telegram-bot] send status: %v\n", err)
 				}
+			case "/setup":
+				if err := handleTelegramSetup(ctx, hc, base, msg.Chat.ID, msg.MessageID, cfg, client, locID); err != nil {
+					e := "*Setup failed*\n" + notify.EscapeMarkdownV2(err.Error())
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, e, msg.MessageID)
+				}
+			case "/setupdone":
+				if err := handleSetupDone(ctx, hc, base, msg.Chat.ID, msg.MessageID); err != nil {
+					fmt.Printf("[telegram-bot] setupdone: %v\n", err)
+				}
+			case "/setupcancel":
+				if err := handleSetupCancel(ctx, hc, base, msg.Chat.ID, msg.MessageID); err != nil {
+					fmt.Printf("[telegram-bot] setupcancel: %v\n", err)
+				}
 			default:
-				h := "*Unknown command*\n" + notify.EscapeMarkdownV2("Try /help or /status.")
+				h := "*Unknown command*\n" + notify.EscapeMarkdownV2("Try /help, /status, or /setup.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -96,20 +130,38 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/start and /help show this text. /status fetches your live schedule from Arbox (same logic as the CLI resolve command).")
-	c := notify.EscapeMarkdownV2("Tip: in Telegram, tap the / button to open the command menu.")
+	b := notify.EscapeMarkdownV2("/status fetches your live Arbox view. /setup builds your week from real Arbox classes (inline buttons), then /setupdone saves to user_plan.yaml on the server volume.")
+	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
 
-type tgUpdate struct {
-	UpdateID int64 `json:"update_id"`
-	Message    *struct {
+// tgCallbackQuery is Telegram's callback_query payload (inline keyboard tap).
+type tgCallbackQuery struct {
+	ID   string `json:"id"`
+	Data string `json:"data"`
+	From struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Message *struct {
 		MessageID int64 `json:"message_id"`
-		Text      string
 		Chat      struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
 	} `json:"message"`
+}
+
+type tgUpdate struct {
+	UpdateID      int64              `json:"update_id"`
+	Message       *tgIncomingMessage `json:"message"`
+	CallbackQuery *tgCallbackQuery   `json:"callback_query"`
+}
+
+type tgIncomingMessage struct {
+	MessageID int64  `json:"message_id"`
+	Text      string `json:"text"`
+	Chat      struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
 }
 
 func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
@@ -117,7 +169,10 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 		"commands": []map[string]string{
 			{"command": "start", "description": "About this bot"},
 			{"command": "help", "description": "List commands"},
-			{"command": "status", "description": "Schedule + next booking windows"},
+			{"command": "status", "description": "Live schedule + next windows"},
+			{"command": "setup", "description": "Pick week from real Arbox classes"},
+			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
+			{"command": "setupcancel", "description": "Abort /setup wizard"},
 		},
 	}
 	return tgPostJSON(ctx, hc, base+"/setMyCommands", payload)

@@ -21,12 +21,9 @@ import (
 func newAuthedClient(ctx context.Context) (*arboxapi.Client, *config.Config, error) {
 	_ = envfile.Load(defaultEnvPath())
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := loadValidated()
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("config invalid: %w", err)
 	}
 
 	email := os.Getenv("ARBOX_EMAIL")

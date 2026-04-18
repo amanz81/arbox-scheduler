@@ -106,7 +106,7 @@ Designed as the container CMD on Fly.io.`,
 					if err != nil {
 						fmt.Printf("[telegram-bot] skip: TELEGRAM_CHAT_ID: %v\n", err)
 					} else {
-						go runTelegramCommandBot(ctx, tok, chatID, cfg, client, locID, lookaheadDays)
+						go runTelegramCommandBot(ctx, tok, chatID, loadValidated, client, locID, lookaheadDays)
 					}
 				}
 			}
@@ -123,6 +123,13 @@ Designed as the container CMD on Fly.io.`,
 					})
 					return nil
 				case <-ticker.C:
+					cfg2, err := loadValidated()
+					if err != nil {
+						fmt.Printf("[daemon] reload config: %v\n", err)
+						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: "reload config: " + err.Error()})
+						continue
+					}
+					cfg = cfg2
 					summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
 					if err != nil {
 						fmt.Printf("[daemon] tick error: %v\n", err)

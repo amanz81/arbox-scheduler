@@ -102,12 +102,28 @@ token — then the daemon calls `sendMessage` **to you** (MarkdownV2).
    On boot you should get one **online** message with version + first tick
    summary; after that, at most one **heartbeat** per local calendar day.
 
-6. **Slash commands:** the daemon calls Telegram `setMyCommands` on boot, so
-   the `/` menu shows **start**, **help**, and **status**. `/status` hits the
-   Arbox API and returns the same kind of snapshot as
-   `arbox schedule resolve` (MarkdownV2). You may see an extra **shutdown**
-   line on each deploy — that is the old machine stopping before the new one
-   starts.
+6. **Slash commands:** the daemon calls Telegram `setMyCommands` on boot.
+   The `/` menu includes **start**, **help**, **status**, **setup**,
+   **setupdone**, and **setupcancel**.
+
+   - **`/status`** — live Arbox snapshot (same idea as `arbox schedule resolve`).
+   - **`/setup`** — fetches the **real** class list from Arbox for the next
+     occurrence of each weekday, then sends **inline buttons** so you can
+     toggle which slots belong in your weekly plan (first tapped = highest
+     priority). **`/setupdone`** writes the result to
+     `user_plan.yaml` on the Fly volume (default: `/data/user_plan.yaml`) and
+     the daemon **reloads it every tick** — no restart needed.
+   - **`/setupcancel`** — discards the in-progress session.
+
+   Optional env vars (defaults work on Fly with `ARBOX_ENV_FILE=/data/.env`):
+
+   - `ARBOX_USER_PLAN` — path to the merged `days:` overlay (default
+     `/data/user_plan.yaml` next to your `.env` directory).
+   - `ARBOX_SETUP_SESSION` — JSON session for `/setup` (default
+     `/data/setup_session.json`).
+
+   You may see an extra **shutdown** line on each deploy — that is the old
+   machine stopping before the new one starts.
 
 If you ever pasted the bot token in a chat, rotate it in @BotFather with
 `/revoke` and update the Fly secret.
