@@ -442,22 +442,9 @@ func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Cla
 	b.WriteByte('\n')
 }
 
-// buildScheduleStatusReport returns a plain-text summary suitable for
-// Telegram /status (caller may wrap with MarkdownV2 escapes).
-// It mirrors the resolve command's data fetch but uses compact lines.
-//
-// It fetches each calendar day in the lookahead once, prints merged plan
-// summary, next upcoming class, Arbox registrations, then planned matching.
-func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
+func fetchScheduleWindow(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (*time.Location, time.Time, time.Time, map[string][]arboxapi.Class, error) {
 	loc := c.Location()
 	now := time.Now().In(loc)
-	opts, err := schedule.NextOptions(c, now, days)
-	if err != nil {
-		return "", err
-	}
-
-	// One pass: full calendar-day schedule for the lookahead (used both for
-	// matching planned options and for "already registered" lines).
 	windowStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	allBy := make(map[string][]arboxapi.Class)
 	for i := 0; i < days; i++ {
@@ -467,9 +454,79 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 		classes, err := client.GetScheduleDay(ctx2, d, locID)
 		cancel()
 		if err != nil {
-			return "", fmt.Errorf("fetch %s: %w", key, err)
+			return nil, time.Time{}, time.Time{}, nil, fmt.Errorf("fetch %s: %w", key, err)
 		}
 		allBy[key] = classes
+	}
+	return loc, now, windowStart, allBy, nil
+}
+
+// appendPlanSelectionsSimple lists enabled-day targets as saved (no priority labels).
+func appendPlanSelectionsSimple(b *strings.Builder, c *config.Config) {
+	b.WriteString("What you selected this week (saved plan):\n")
+	n := 0
+	for _, dk := range setupWeekdayOrder {
+		d, ok := c.Days[dk]
+		if !ok {
+			continue
+		}
+		wd, okWD := dayKeyToWeekday[dk]
+		if !okWD {
+			continue
+		}
+		n++
+		pretty := strings.ToUpper(dk[:1]) + dk[1:]
+		if !d.Enabled {
+			fmt.Fprintf(b, "· %s: off\n", pretty)
+			continue
+		}
+		opts := c.OptionsFor(wd)
+		if len(opts) == 0 {
+			fmt.Fprintf(b, "· %s: (no times)\n", pretty)
+			continue
+		}
+		var parts []string
+		for _, o := range opts {
+			p := o.Time
+			if strings.TrimSpace(o.Category) != "" {
+				p += " " + strings.TrimSpace(o.Category)
+			}
+			parts = append(parts, p)
+		}
+		fmt.Fprintf(b, "· %s: %s\n", pretty, strings.Join(parts, ", "))
+	}
+	if n == 0 {
+		b.WriteString("· (no days block in config)\n")
+	}
+}
+
+// buildStatusShortReport is for Telegram /status: saved selections + Arbox bookings only.
+func buildStatusShortReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
+	loc, _, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Timezone: %s\n", c.Timezone)
+	fmt.Fprintf(&b, "All times: %s.\n\n", c.Timezone)
+	appendPlanSelectionsSimple(&b, c)
+	b.WriteByte('\n')
+	writeUserBookingsSection(&b, allBy, loc, windowStart, days,
+		"Already booked in Arbox (BOOKED / WAITLIST):",
+		"If a booking is missing but shows in the Arbox app, the API may not mark this account on this endpoint.")
+	b.WriteString("\nDetails for the next week: /weeklyavailable\n")
+	return b.String(), nil
+}
+
+// buildWeeklyAvailableReport is for Telegram /weeklyavailable: live schedule vs plan (longer).
+func buildWeeklyAvailableReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
+	loc, now, windowStart, allBy, err := fetchScheduleWindow(ctx, c, client, locID, days)
+	if err != nil {
+		return "", err
+	}
+	opts, err := schedule.NextOptions(c, now, days)
+	if err != nil {
+		return "", err
 	}
 
 	var b strings.Builder
@@ -483,7 +540,9 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 	appendCurrentPlanSummary(&b, c)
 	appendNextUpcomingClass(&b, allBy, c.CategoryFilter, loc, windowStart, days, now)
 
-	writeUserRegistrationsSection(&b, allBy, loc, windowStart, days)
+	writeUserBookingsSection(&b, allBy, loc, windowStart, days,
+		"A) Already in Arbox (BOOKED / WAITLIST):",
+		"If you know you have bookings but this stays empty, Arbox may not mark them on this API response for your account.")
 
 	if len(opts) == 0 {
 		fmt.Fprintf(&b, "\nB) Plan vs live schedule (booking targets):\n"+
@@ -499,8 +558,8 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 			}
 			switch len(matches) {
 			case 0:
-				fmt.Fprintf(&b, "· %s %s pri%d %s → no match | window %s\n",
-					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+				fmt.Fprintf(&b, "· %s %s %s → no match | window %s\n",
+					o.Weekday.String()[:3], o.Time, optCat,
 					o.WindowOpen.Format("Mon 02 Jan 15:04"))
 			case 1:
 				cl := matches[0]
@@ -508,8 +567,8 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 				if st == "" {
 					st = "open"
 				}
-				fmt.Fprintf(&b, "· %s %s pri%d %s → %s | spots %d/%d free %d wl %d | you %s | window %s | id %d\n",
-					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+				fmt.Fprintf(&b, "· %s %s %s → %s | spots %d/%d free %d wl %d | you %s | window %s | id %d\n",
+					o.Weekday.String()[:3], o.Time, optCat,
 					cl.ResolvedCategoryName(), cl.Registered, cl.MaxUsers, cl.Free, cl.StandBy,
 					st, o.WindowOpen.Format("Mon 02 Jan 15:04"), cl.ID)
 			default:
@@ -517,8 +576,8 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 				for _, m := range matches {
 					names = append(names, m.ResolvedCategoryName())
 				}
-				fmt.Fprintf(&b, "· %s %s pri%d %s → ambiguous: %s | window %s\n",
-					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+				fmt.Fprintf(&b, "· %s %s %s → ambiguous: %s | window %s\n",
+					o.Weekday.String()[:3], o.Time, optCat,
 					strings.Join(names, ", "), o.WindowOpen.Format("Mon 02 Jan 15:04"))
 			}
 		}
@@ -558,20 +617,68 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 			if you == "" {
 				you = "-"
 			}
-			fmt.Fprintf(&b, "· %s → %s (plan tier pri %d) | free %d wl %d you %s | id %d | window %s\n",
+			fmt.Fprintf(&b, "· %s → %s | free %d wl %d you %s | id %d | window %s\n",
 				classStart.Format("Mon 02 Jan 15:04"),
-				winner.ResolvedCategoryName(), winnerOpt.Priority,
+				winner.ResolvedCategoryName(),
 				winner.Free, winner.StandBy, you, winner.ID,
 				winnerOpt.WindowOpen.Format("Mon 02 Jan 15:04"))
 		}
 	}
 
+	appendWeeklyByDayListing(&b, allBy, c.CategoryFilter, loc, windowStart, days, 12, now)
+
 	return b.String(), nil
 }
 
-// writeUserRegistrationsSection lists BOOKED / WAITLIST classes from the
-// already-fetched day maps (same source as /status matching).
-func writeUserRegistrationsSection(b *strings.Builder, allBy map[string][]arboxapi.Class, loc *time.Location, windowStart time.Time, days int) {
+// appendWeeklyByDayListing adds a compact future class list per calendar day.
+func appendWeeklyByDayListing(b *strings.Builder, allBy map[string][]arboxapi.Class, flt config.CategoryFilter, loc *time.Location, windowStart time.Time, days, maxPerDay int, now time.Time) {
+	var sec strings.Builder
+	fmt.Fprintf(&sec, "\nD) Upcoming classes by day (pass category_filter, after now, capped per day):\n")
+	any := false
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		var rows []arboxapi.Class
+		for _, cl := range allBy[key] {
+			if !classPassesGlobalFilter(cl.ResolvedCategoryName(), flt) {
+				continue
+			}
+			when, err := classStartsAt(cl, key, loc)
+			if err != nil || !when.After(now) {
+				continue
+			}
+			rows = append(rows, cl)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		any = true
+		fmt.Fprintf(&sec, "%s %s:\n", d.Weekday().String()[:3], key)
+		limit := len(rows)
+		if limit > maxPerDay {
+			limit = maxPerDay
+		}
+		for j := 0; j < limit; j++ {
+			cl := rows[j]
+			you := cl.YouStatus()
+			if you == "" {
+				you = "-"
+			}
+			fmt.Fprintf(&sec, "  · %s %s · free %d · you %s · id %d\n",
+				cl.Time, cl.ResolvedCategoryName(), cl.Free, you, cl.ID)
+		}
+		if len(rows) > maxPerDay {
+			fmt.Fprintf(&sec, "  · … +%d more this day\n", len(rows)-maxPerDay)
+		}
+	}
+	if any {
+		b.WriteString(sec.String())
+	}
+}
+
+// writeUserBookingsSection lists BOOKED / WAITLIST classes from the
+// already-fetched day maps.
+func writeUserBookingsSection(b *strings.Builder, allBy map[string][]arboxapi.Class, loc *time.Location, windowStart time.Time, days int, title, emptyNote string) {
 	type line struct {
 		when time.Time
 		text string
@@ -602,10 +709,15 @@ func writeUserRegistrationsSection(b *strings.Builder, allBy map[string][]arboxa
 	}
 	sort.Slice(lines, func(i, j int) bool { return lines[i].when.Before(lines[j].when) })
 
-	b.WriteString("A) Already in Arbox (BOOKED = confirmed seat, WAITLIST = waitlist):\n")
+	b.WriteString(title)
+	b.WriteByte('\n')
 	if len(lines) == 0 {
 		b.WriteString("· none in this window.\n")
-		b.WriteString("  (If you know you have bookings but this stays empty, Arbox may not mark them on this API response for your account.)\n")
+		if emptyNote != "" {
+			b.WriteString("  ")
+			b.WriteString(emptyNote)
+			b.WriteByte('\n')
+		}
 		return
 	}
 	for _, ln := range lines {

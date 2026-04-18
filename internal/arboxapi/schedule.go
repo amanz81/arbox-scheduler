@@ -92,13 +92,94 @@ func (c Class) ResolvedCategoryName() string {
 
 // YouStatus returns a short label for the user's relationship to this class.
 func (c Class) YouStatus() string {
-	switch {
-	case c.UserBookedID != nil:
+	if c.UserBookedID != nil {
 		return "BOOKED"
-	case c.UserStandByID != nil:
+	}
+	if c.UserStandByID != nil {
 		return "WAITLIST"
+	}
+	if c.Raw != nil {
+		if bookingFromRaw(c.Raw) {
+			return "BOOKED"
+		}
+		if standbyFromRaw(c.Raw) {
+			return "WAITLIST"
+		}
+	}
+	return ""
+}
+
+func bookingFromRaw(raw map[string]any) bool {
+	for _, k := range []string{
+		"user_booked", "userBooked", "schedule_user_id", "scheduleUserId",
+		"member_schedule_user_id",
+	} {
+		if v, ok := raw[k]; ok && isPositiveBookingRef(v) {
+			return true
+		}
+	}
+	if v, ok := raw["is_booked"]; ok && truthyScalar(v) {
+		return true
+	}
+	if v, ok := raw["booked"]; ok && truthyScalar(v) {
+		return true
+	}
+	return false
+}
+
+func standbyFromRaw(raw map[string]any) bool {
+	for _, k := range []string{"user_in_standby", "userInStandby", "stand_by_user", "standByUser"} {
+		if v, ok := raw[k]; ok && isPositiveBookingRef(v) {
+			return true
+		}
+	}
+	if v, ok := raw["in_standby"]; ok && truthyScalar(v) {
+		return true
+	}
+	return false
+}
+
+func isPositiveBookingRef(v any) bool {
+	switch x := v.(type) {
+	case float64:
+		return x > 0
+	case int:
+		return x > 0
+	case int64:
+		return x > 0
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" || s == "0" {
+			return false
+		}
+		// non-empty id-like string from API
+		return true
+	case map[string]any:
+		if id, ok := x["id"]; ok {
+			return isPositiveBookingRef(id)
+		}
+		if id, ok := x["schedule_user_id"]; ok {
+			return isPositiveBookingRef(id)
+		}
+		return false
 	default:
-		return ""
+		return false
+	}
+}
+
+func truthyScalar(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case float64:
+		return x != 0
+	case int:
+		return x != 0
+	case string:
+		s := strings.TrimSpace(strings.ToLower(x))
+		return s == "1" || s == "true" || s == "yes"
+	default:
+		return false
 	}
 }
 

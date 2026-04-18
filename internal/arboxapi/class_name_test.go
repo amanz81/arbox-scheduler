@@ -18,3 +18,11 @@ func TestClass_ResolvedCategoryName_fromRaw(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestClass_YouStatus_fromRawUserBooked(t *testing.T) {
+	var c Class
+	c.Raw = map[string]any{"user_booked": float64(991)}
+	if got := c.YouStatus(); got != "BOOKED" {
+		t.Fatalf("got %q", got)
+	}
+}

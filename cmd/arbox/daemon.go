@@ -48,7 +48,7 @@ Current behavior (heartbeat-only, no real bookings yet):
       · one *online* message on boot
       · one *heartbeat* per calendar day (local TZ) with next-window summary
       · one *shutdown* message on SIGTERM
-      · long-poll command handler: /start, /help, /status, /setup, /setupdone, /setupcancel (setMyCommands)
+      · long-poll command handler: /start, /help, /status, /weeklyavailable, /setup, /setupdone, /setupcancel (setMyCommands)
 
 Designed as the container CMD on Fly.io.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

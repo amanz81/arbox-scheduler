@@ -109,7 +109,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				body := helpTelegramBody()
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, body, msg.MessageID)
 			case "/status":
-				rep, err := buildScheduleStatusReport(ctx, cfg, client, locID, lookaheadDays)
+				rep, err := buildStatusShortReport(ctx, cfg, client, locID, lookaheadDays)
 				if err != nil {
 					out := "*Status*\n" + notify.EscapeMarkdownV2("Error: "+err.Error())
 					if sendErr := tgSendMessage(ctx, hc, base, msg.Chat.ID, out, msg.MessageID); sendErr != nil {
@@ -117,8 +117,20 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 					}
 					continue
 				}
-				if err := tgSendStatusReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, rep); err != nil {
+				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Status", rep); err != nil {
 					fmt.Printf("[telegram-bot] send status: %v\n", err)
+				}
+			case "/weeklyavailable":
+				rep, err := buildWeeklyAvailableReport(ctx, cfg, client, locID, lookaheadDays)
+				if err != nil {
+					out := "*Weekly available*\n" + notify.EscapeMarkdownV2("Error: "+err.Error())
+					if sendErr := tgSendMessage(ctx, hc, base, msg.Chat.ID, out, msg.MessageID); sendErr != nil {
+						fmt.Printf("[telegram-bot] send weekly error reply: %v\n", sendErr)
+					}
+					continue
+				}
+				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Weekly available", rep); err != nil {
+					fmt.Printf("[telegram-bot] send weekly: %v\n", err)
 				}
 			case "/setup":
 				if err := handleTelegramSetup(ctx, hc, base, msg.Chat.ID, msg.MessageID, cfg, client, locID); err != nil {
@@ -139,7 +151,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				}
 			default:
 				h := "*Unknown command*\n" + notify.EscapeMarkdownV2(
-					"Try /start, /help, /status, /setup, /setupdone, or /setupcancel.")
+					"Try /start, /help, /status, /weeklyavailable, /setup, /setupdone, or /setupcancel.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -148,7 +160,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status: quick guide, saved plan, next class, A) your Arbox bookings, B/C) each plan target vs live classes. /setup: ✓/○ toggles; /setupdone saves user_plan.yaml on the server.")
+	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /weeklyavailable — next-week live schedule vs plan (longer). /setup + /setupdone save user_plan.yaml on the server.")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
@@ -187,7 +199,8 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 		"commands": []map[string]string{
 			{"command": "start", "description": "About this bot"},
 			{"command": "help", "description": "List commands"},
-			{"command": "status", "description": "Live schedule + next windows"},
+			{"command": "status", "description": "Selections + your bookings"},
+			{"command": "weeklyavailable", "description": "Next week live vs plan"},
 			{"command": "setup", "description": "Pick week from real Arbox classes"},
 			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
 			{"command": "setupcancel", "description": "Abort /setup wizard"},
@@ -262,14 +275,14 @@ func tgSendMessageMode(ctx context.Context, hc *http.Client, base string, chatID
 	return tgPostJSON(ctx, hc, base+"/sendMessage", payload)
 }
 
-// tgSendStatusReport sends /status output, splitting across messages if the
-// MarkdownV2-escaped body would exceed Telegram limits.
-func tgSendStatusReport(ctx context.Context, hc *http.Client, base string, chatID, replyTo int64, rep string) error {
+// tgSendChunkedReport sends a titled MarkdownV2 report, splitting the body
+// across messages if needed (title is plain ASCII, no special chars).
+func tgSendChunkedReport(ctx context.Context, hc *http.Client, base string, chatID, replyTo int64, title string, rep string) error {
 	firstChunks := splitTelegramByteChunks(rep, tgFirstMarkdownBodyBytes)
 	if len(firstChunks) == 0 {
 		firstChunks = []string{""}
 	}
-	head := "*Status*\n" + notify.EscapeMarkdownV2(firstChunks[0])
+	head := "*" + notify.EscapeMarkdownV2(title) + "*\n" + notify.EscapeMarkdownV2(firstChunks[0])
 	if err := tgSendMessage(ctx, hc, base, chatID, head, replyTo); err != nil {
 		return err
 	}
