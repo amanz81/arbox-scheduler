@@ -1,0 +1,35 @@
+# Keep the build context lean so fly's remote builder doesn't upload junk.
+
+# VCS
+.git
+.gitignore
+
+# Local build output
+bin/
+dist/
+*.test
+*.out
+
+# Editor / OS cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Secrets & runtime state — NEVER bake into an image
+.env
+.env.*
+!.env.example
+history/
+*.log
+
+# Docs and scratch files don't belong in the image
+docs/
+*.md
+!README.md
+
+# Fly config itself
+fly.toml
+
+# Test artifacts
+coverage.out

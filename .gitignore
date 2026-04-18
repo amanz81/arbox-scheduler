@@ -1,0 +1,24 @@
+# Binaries
+/bin/
+/arbox
+/arbox-scheduler
+*.exe
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Shell / agent history
+.history/
+*.history
+history.txt
+
+# Go build cache output
+*.out
+coverage.txt

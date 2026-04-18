@@ -1,0 +1,141 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
+	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/amanz81/arbox-scheduler/internal/schedule"
+)
+
+// Version is overridden at build time via `-ldflags "-X main.Version=vX.Y"`.
+var Version = "dev"
+
+// newDaemonCmd is the long-running process we'll ship to Fly.io.
+//
+// For now it's a HEARTBEAT + RESOLVE daemon: every `--interval`, fetch the
+// next N days of options and log what's coming, including the countdown to
+// the next booking window. Good enough to verify the deploy pipeline and
+// auto-relogin work end-to-end.
+//
+// The priority booking engine (waitlist two classes, book the winner,
+// cancel the loser) will replace the heartbeat body in a follow-up change.
+func newDaemonCmd() *cobra.Command {
+	var (
+		interval      time.Duration
+		lookaheadDays int
+	)
+	cmd := &cobra.Command{
+		Use:   "daemon",
+		Short: "Long-running supervisor (Fly.io / systemd entrypoint)",
+		Long: `Runs the Arbox scheduler as a long-running process.
+
+Current behavior (heartbeat-only, no real bookings yet):
+  - Every --interval, log the next planned option and countdown.
+  - Re-auths silently when the access token expires.
+  - Exits cleanly on SIGINT / SIGTERM.
+
+Designed as the container CMD on Fly.io.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadValidated()
+			if err != nil {
+				return err
+			}
+			client, _, err := newAuthedClient(cmd.Context())
+			if err != nil {
+				return err
+			}
+
+			// Signal-aware context for clean shutdown.
+			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			fmt.Printf("[daemon] version=%s interval=%s lookahead=%dd tz=%s\n",
+				Version, interval, lookaheadDays, cfg.Timezone)
+
+			// Discover locations_box_id once up front.
+			locID, err := ensureLocationsBoxID(ctx, client)
+			if err != nil {
+				return fmt.Errorf("initial locations discovery: %w", err)
+			}
+
+			// First tick immediately, then every `interval`.
+			if err := tick(ctx, cfg, client, locID, lookaheadDays); err != nil {
+				fmt.Printf("[daemon] tick error: %v\n", err)
+			}
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					fmt.Println("[daemon] shutdown requested — goodbye")
+					return nil
+				case <-ticker.C:
+					if err := tick(ctx, cfg, client, locID, lookaheadDays); err != nil {
+						fmt.Printf("[daemon] tick error: %v\n", err)
+					}
+				}
+			}
+		},
+	}
+	cmd.Flags().DurationVar(&interval, "interval", 5*time.Minute,
+		"how often to re-resolve the schedule")
+	cmd.Flags().IntVar(&lookaheadDays, "lookahead", 7,
+		"days to look ahead when resolving options")
+	return cmd
+}
+
+// tick runs one heartbeat iteration: resolve planned options, print the
+// next window countdown. Uses `client` to exercise the auth path so an
+// expired token will trigger silent re-login here rather than at booking
+// time.
+func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locID, days int) error {
+	loc := cfg.Location()
+	now := time.Now().In(loc)
+	fmt.Printf("[tick] %s  locations_box_id=%d\n",
+		now.Format("2006-01-02 15:04:05 MST"), locID)
+
+	opts, err := schedule.NextOptions(cfg, now, days)
+	if err != nil {
+		return fmt.Errorf("resolve options: %w", err)
+	}
+	if len(opts) == 0 {
+		fmt.Printf("  (no planned options in the next %d days)\n", days)
+		return nil
+	}
+
+	// Fetch today's classes just to exercise the auth path and catch a
+	// stale token early.
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	_, err = client.GetScheduleDay(fetchCtx, today, locID)
+	cancel()
+	if err != nil {
+		fmt.Printf("  auth-probe fetch failed: %v\n", err)
+	}
+
+	// Find the next option whose window is still in the future.
+	var next *schedule.PlannedOption
+	for i := range opts {
+		if opts[i].WindowOpen.After(now) {
+			next = &opts[i]
+			break
+		}
+	}
+	if next == nil {
+		fmt.Println("  (all lookahead windows are already open)")
+		return nil
+	}
+	fmt.Printf("  next window opens in %s @ %s — %s %s (pri=%d, cat=%q)\n",
+		next.WindowOpen.Sub(now).Round(time.Second),
+		next.WindowOpen.Format("2006-01-02 15:04 MST"),
+		next.Weekday, next.Time, next.Priority, next.Category)
+	return nil
+}

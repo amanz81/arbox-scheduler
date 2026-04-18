@@ -1,0 +1,47 @@
+# fly.toml — Fly.io config for arbox-scheduler
+#
+# This app is OUTBOUND-ONLY: no public HTTP port, no load balancer. It's a
+# long-running worker that calls the Arbox API on a schedule. Because of
+# that there is no [[services]] / [http_service] block.
+#
+# App name, region, and org are filled in by `fly launch`. Edit `app` and
+# `primary_region` after launch if you want.
+
+app            = "arbox-scheduler"   # override via `fly launch` if taken
+primary_region = "fra"               # frankfurt = lowest-latency free region to Israel
+
+# --------------------------------------------------------------------------
+# Build: use the Dockerfile in this repo.
+# --------------------------------------------------------------------------
+[build]
+  dockerfile = "Dockerfile"
+
+# --------------------------------------------------------------------------
+# Non-secret environment. Secrets (ARBOX_EMAIL, ARBOX_PASSWORD) live in
+# `fly secrets` and are never checked in.
+# --------------------------------------------------------------------------
+[env]
+  TZ             = "Asia/Jerusalem"
+  ARBOX_ENV_FILE = "/data/.env"
+
+# --------------------------------------------------------------------------
+# Persistent volume: token/refresh-token state survives restarts & redeploys.
+# Create with:  fly volumes create arbox_data --region fra --size 1
+# --------------------------------------------------------------------------
+[mounts]
+  source      = "arbox_data"
+  destination = "/data"
+
+# --------------------------------------------------------------------------
+# Single small machine is plenty. Auto-stop OFF — we must stay awake to fire
+# at booking windows. Auto-restart ON so crashes recover on their own.
+# --------------------------------------------------------------------------
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
+
+[processes]
+  app = "daemon --interval=1m --lookahead=7"
+
+[deploy]
+  strategy = "immediate"

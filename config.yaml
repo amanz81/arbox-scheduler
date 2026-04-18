@@ -1,0 +1,76 @@
+# Arbox auto-scheduler config.
+# Times are 24h "HH:MM" in the configured timezone.
+#
+# Each day can be written two ways:
+#   1. Shorthand (single option):
+#        monday: { enabled: true, time: "08:30", category: "Hall B" }
+#   2. Priority list (ordered; first is most preferred):
+#        monday:
+#          enabled: true
+#          options:
+#            - { time: "08:30", category: "Hall B" }
+#            - { time: "08:30", category: "Hall A" }
+#
+# `category` is a case-insensitive substring match against Arbox's
+# box_categories.name (e.g. "Crossfit Hall B", "CrossFit- Hall A").
+# Global `category_filter` excludes always apply on top.
+
+timezone: Asia/Jerusalem
+default_time: "09:00"
+
+# Global filter: only classes whose category contains one of `include` AND
+# none of `exclude` are considered "real candidates". Applied when an option
+# doesn't set its own `category`, and also as a safety net when it does.
+category_filter:
+  include:
+    - "Hall A"
+    - "Hall B"
+  exclude:
+    - "Open"           # skip Open Workout / Open Box
+    - "Weightlifting"  # not my thing at the moment
+    - "Kids"
+    - "Teens"
+    - "Mobility"
+
+days:
+  # Sunday: 48h booking window (opens Friday same time). Prefer Hall B, fall
+  # back to Hall A if the B slot doesn't exist or fills up.
+  sunday:
+    enabled: true
+    options:
+      - { time: "08:00", category: "Hall B" }
+      - { time: "08:00", category: "Hall A" }
+
+  # Monday: rare 08:30 slot. Same hall priority.
+  monday:
+    enabled: true
+    options:
+      - { time: "08:30", category: "Hall B" }
+      - { time: "08:30", category: "Hall A" }
+
+  # Tuesday: default 09:00. Usually only Hall A exists at this slot.
+  tuesday:
+    enabled: true
+    options:
+      - { time: "09:00", category: "Hall B" }
+      - { time: "09:00", category: "Hall A" }
+
+  wednesday:
+    enabled: false  # rest day
+
+  # Thursday: same 08:30 as Monday.
+  thursday:
+    enabled: true
+    options:
+      - { time: "08:30", category: "Hall B" }
+      - { time: "08:30", category: "Hall A" }
+
+  # Friday: weekend slot at 11:00.
+  friday:
+    enabled: true
+    options:
+      - { time: "11:00", category: "Hall B" }
+      - { time: "11:00", category: "Hall A" }
+
+  saturday:
+    enabled: false  # rest day
