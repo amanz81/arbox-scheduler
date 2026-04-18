@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +48,7 @@ Current behavior (heartbeat-only, no real bookings yet):
       · one *online* message on boot
       · one *heartbeat* per calendar day (local TZ) with next-window summary
       · one *shutdown* message on SIGTERM
+      · long-poll command handler: /start, /help, /status (slash menu via setMyCommands)
 
 Designed as the container CMD on Fly.io.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -95,6 +98,17 @@ Designed as the container CMD on Fly.io.`,
 			}
 			if err := notifier.Notify(notify.Message{Event: notify.EventOnline, Text: onlineText}); err != nil {
 				fmt.Printf("[notify] online message: %v\n", err)
+			}
+
+			if tok := os.Getenv("TELEGRAM_BOT_TOKEN"); tok != "" {
+				if cid := strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")); cid != "" {
+					chatID, err := strconv.ParseInt(cid, 10, 64)
+					if err != nil {
+						fmt.Printf("[telegram-bot] skip: TELEGRAM_CHAT_ID: %v\n", err)
+					} else {
+						go runTelegramCommandBot(ctx, tok, chatID, cfg, client, locID, lookaheadDays)
+					}
+				}
 			}
 
 			ticker := time.NewTicker(interval)

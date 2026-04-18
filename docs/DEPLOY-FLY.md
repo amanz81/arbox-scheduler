@@ -102,6 +102,13 @@ token — then the daemon calls `sendMessage` **to you** (MarkdownV2).
    On boot you should get one **online** message with version + first tick
    summary; after that, at most one **heartbeat** per local calendar day.
 
+6. **Slash commands:** the daemon calls Telegram `setMyCommands` on boot, so
+   the `/` menu shows **start**, **help**, and **status**. `/status` hits the
+   Arbox API and returns the same kind of snapshot as
+   `arbox schedule resolve` (MarkdownV2). You may see an extra **shutdown**
+   line on each deploy — that is the old machine stopping before the new one
+   starts.
+
 If you ever pasted the bot token in a chat, rotate it in @BotFather with
 `/revoke` and update the Fly secret.
 
