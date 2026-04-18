@@ -67,12 +67,13 @@ days:
       - { time: "08:30", category: "Hall B" }
       - { time: "08:30", category: "Hall A" }
 
-  # Friday: Hall B at 09:00 (per gym schedule).
+  # Friday: your preferred slot (11:00). Hall B also exists at 09:00 some
+  # weeks at the gym; that is not what this row targets.
   friday:
     enabled: true
     options:
-      - { time: "09:00", category: "Hall B" }
-      - { time: "09:00", category: "Hall A" }
+      - { time: "11:00", category: "Hall B" }
+      - { time: "11:00", category: "Hall A" }
 
   saturday:
     enabled: false  # rest day
