@@ -245,9 +245,129 @@ func printPreferred(w *os.File, opts []schedule.PlannedOption, byDate map[string
 	_ = tw.Flush()
 }
 
+// classStartsAt parses class date+time in loc; empty class.Date uses dayKey.
+func classStartsAt(cl arboxapi.Class, dayKey string, loc *time.Location) (time.Time, error) {
+	dateStr := cl.Date
+	if strings.TrimSpace(dateStr) == "" {
+		dateStr = dayKey
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04", dateStr+" "+cl.Time, loc); err == nil {
+		return t, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", dateStr+" "+cl.Time, loc)
+}
+
+func appendCurrentPlanSummary(b *strings.Builder, c *config.Config) {
+	b.WriteString("Current plan (merged config, including user_plan if present):\n")
+	n := 0
+	for _, dk := range setupWeekdayOrder {
+		d, ok := c.Days[dk]
+		if !ok {
+			continue
+		}
+		wd, okWD := dayKeyToWeekday[dk]
+		if !okWD {
+			continue
+		}
+		n++
+		pretty := strings.ToUpper(dk[:1]) + dk[1:]
+		if !d.Enabled {
+			fmt.Fprintf(b, "· %s: disabled (rest day)\n", pretty)
+			continue
+		}
+		opts := c.OptionsFor(wd)
+		if len(opts) == 0 {
+			fmt.Fprintf(b, "· %s: enabled but no resolvable time/options\n", pretty)
+			continue
+		}
+		var parts []string
+		for _, o := range opts {
+			p := o.Time
+			if strings.TrimSpace(o.Category) != "" {
+				p += " · " + o.Category
+			} else {
+				p += " · (category from global filter)"
+			}
+			parts = append(parts, p)
+		}
+		fmt.Fprintf(b, "· %s: %s\n", pretty, strings.Join(parts, " → "))
+	}
+	if n == 0 {
+		b.WriteString("· (no days: block in config — only defaults apply)\n")
+	}
+	if dt := strings.TrimSpace(c.DefaultTime); dt != "" {
+		fmt.Fprintf(b, "· default_time (bare enabled days): %s\n", dt)
+	}
+	inc, ex := c.CategoryFilter.Include, c.CategoryFilter.Exclude
+	if len(inc) > 0 || len(ex) > 0 {
+		fmt.Fprintf(b, "· category_filter — include: %s exclude: %s\n", strings.Join(inc, ", "), strings.Join(ex, ", "))
+	}
+	b.WriteByte('\n')
+}
+
+func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Class, flt config.CategoryFilter, loc *time.Location, windowStart time.Time, days int, now time.Time) {
+	type hit struct {
+		when time.Time
+		cl   arboxapi.Class
+	}
+	var hits []hit
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		for _, cl := range allBy[key] {
+			if !classPassesGlobalFilter(cl.BoxCategories.Name, flt) {
+				continue
+			}
+			when, err := classStartsAt(cl, key, loc)
+			if err != nil {
+				continue
+			}
+			if !when.After(now) {
+				continue
+			}
+			hits = append(hits, hit{when, cl})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].when.Before(hits[j].when) })
+
+	b.WriteString("Next class after now (category_filter applies):\n")
+	if len(hits) == 0 {
+		b.WriteString("· none in this lookahead.\n\n")
+		return
+	}
+	chosen := hits[0]
+	label := "earliest in window (no open spots in this lookahead)"
+	for i := range hits {
+		if hits[i].cl.Free > 0 {
+			chosen = hits[i]
+			label = "next with open spots"
+			break
+		}
+	}
+	you := chosen.cl.YouStatus()
+	if you == "" {
+		you = "-"
+	}
+	fmt.Fprintf(b, "· %s — %s · %s · free %d · wl %d · you %s · schedule_id %d\n",
+		label,
+		chosen.when.Format("Mon 02 Jan 15:04"),
+		chosen.cl.BoxCategories.Name,
+		chosen.cl.Free,
+		chosen.cl.StandBy,
+		you,
+		chosen.cl.ID)
+	if chosen.cl.Free == 0 {
+		b.WriteString("  (Waitlist may open with the booking window; check Arbox.)\n")
+	}
+	b.WriteByte('\n')
+}
+
 // buildScheduleStatusReport returns a plain-text summary suitable for
 // Telegram /status (caller may wrap with MarkdownV2 escapes).
 // It mirrors the resolve command's data fetch but uses compact lines.
+//
+// It fetches each calendar day in the lookahead once, prints merged plan
+// summary, next upcoming class, Arbox registrations, then planned matching.
 func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *arboxapi.Client, locID, days int) (string, error) {
 	loc := c.Location()
 	now := time.Now().In(loc)
@@ -255,105 +375,160 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 	if err != nil {
 		return "", err
 	}
-	if len(opts) == 0 {
-		return fmt.Sprintf("No planned options in the next %d days.", days), nil
-	}
 
-	byDate := map[string][]arboxapi.Class{}
-	for _, o := range opts {
-		key := o.ClassStart.Format("2006-01-02")
-		if _, ok := byDate[key]; ok {
-			continue
-		}
+	// One pass: full calendar-day schedule for the lookahead (used both for
+	// matching planned options and for "already registered" lines).
+	windowStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	allBy := make(map[string][]arboxapi.Class)
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
 		ctx2, cancel := context.WithTimeout(ctx, 20*time.Second)
-		day := time.Date(o.ClassStart.Year(), o.ClassStart.Month(), o.ClassStart.Day(), 0, 0, 0, 0, loc)
-		classes, err := client.GetScheduleDay(ctx2, day, locID)
+		classes, err := client.GetScheduleDay(ctx2, d, locID)
 		cancel()
 		if err != nil {
 			return "", fmt.Errorf("fetch %s: %w", key, err)
 		}
-		byDate[key] = classes
+		allBy[key] = classes
 	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Timezone: %s\nLookahead: %d days\n\n", c.Timezone, days)
-	fmt.Fprintf(&b, "Options:\n")
-	for _, o := range opts {
-		key := o.ClassStart.Format("2006-01-02")
-		matches := resolveOption(o, byDate[key], c.CategoryFilter)
-		optCat := o.Category
-		if optCat == "" {
-			optCat = "(global filter)"
+	appendCurrentPlanSummary(&b, c)
+	appendNextUpcomingClass(&b, allBy, c.CategoryFilter, loc, windowStart, days, now)
+	fmt.Fprintf(&b, "How to read this:\n"+
+		"· A) Classes you already hold in Arbox (BOOKED / WAITLIST).\n"+
+		"· B–C) What your YAML plan wants vs what appears on the schedule (\"no match\" means no class matched that time/category yet).\n\n")
+
+	writeUserRegistrationsSection(&b, allBy, loc, windowStart, days)
+
+	if len(opts) == 0 {
+		fmt.Fprintf(&b, "\nB) Planned booking targets:\n"+
+			"(No planned options in the next %d days — nothing from user_plan/config to match.)\n\n", days)
+	} else {
+		fmt.Fprintf(&b, "\nB) Planned booking targets (each line = one plan option):\n")
+		for _, o := range opts {
+			key := o.ClassStart.Format("2006-01-02")
+			matches := resolveOption(o, allBy[key], c.CategoryFilter)
+			optCat := o.Category
+			if optCat == "" {
+				optCat = "(global filter)"
+			}
+			switch len(matches) {
+			case 0:
+				fmt.Fprintf(&b, "· %s %s pri%d %s → no match | window %s\n",
+					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+					o.WindowOpen.Format("Mon 02 Jan 15:04"))
+			case 1:
+				cl := matches[0]
+				st := cl.YouStatus()
+				if st == "" {
+					st = "open"
+				}
+				fmt.Fprintf(&b, "· %s %s pri%d %s → %s | spots %d/%d free %d wl %d | you %s | window %s | id %d\n",
+					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+					cl.BoxCategories.Name, cl.Registered, cl.MaxUsers, cl.Free, cl.StandBy,
+					st, o.WindowOpen.Format("Mon 02 Jan 15:04"), cl.ID)
+			default:
+				names := make([]string, 0, len(matches))
+				for _, m := range matches {
+					names = append(names, m.BoxCategories.Name)
+				}
+				fmt.Fprintf(&b, "· %s %s pri%d %s → ambiguous: %s | window %s\n",
+					o.Weekday.String()[:3], o.Time, o.Priority, optCat,
+					strings.Join(names, ", "), o.WindowOpen.Format("Mon 02 Jan 15:04"))
+			}
 		}
-		switch len(matches) {
-		case 0:
-			fmt.Fprintf(&b, "· %s %s pri%d %s → no match | window %s\n",
-				o.Weekday.String()[:3], o.Time, o.Priority, optCat,
-				o.WindowOpen.Format("Mon 02 Jan 15:04"))
-		case 1:
-			cl := matches[0]
+
+		b.WriteString("\nC) Preferred per class start (first plan option that matches a live class):\n")
+		groups := map[time.Time][]schedule.PlannedOption{}
+		var starts []time.Time
+		for _, o := range opts {
+			if _, ok := groups[o.ClassStart]; !ok {
+				starts = append(starts, o.ClassStart)
+			}
+			groups[o.ClassStart] = append(groups[o.ClassStart], o)
+		}
+		sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
+
+		for _, classStart := range starts {
+			day := groups[classStart]
+			sort.SliceStable(day, func(i, j int) bool { return day[i].Priority < day[j].Priority })
+			var winner *arboxapi.Class
+			var winnerOpt schedule.PlannedOption
+			for _, o := range day {
+				matches := resolveOption(o, allBy[o.ClassStart.Format("2006-01-02")], c.CategoryFilter)
+				if len(matches) >= 1 {
+					w := matches[0]
+					winner = &w
+					winnerOpt = o
+					break
+				}
+			}
+			if winner == nil {
+				fmt.Fprintf(&b, "· %s %s → no option matched | window %s\n",
+					classStart.Weekday().String()[:3],
+					classStart.Format("Mon 02 Jan 15:04"),
+					day[0].WindowOpen.Format("Mon 02 Jan 15:04"))
+				continue
+			}
+			you := winner.YouStatus()
+			if you == "" {
+				you = "-"
+			}
+			fmt.Fprintf(&b, "· %s %s → %s (pri %d) | free %d wl %d you %s | id %d | window %s\n",
+				classStart.Weekday().String()[:3],
+				classStart.Format("Mon 02 Jan 15:04"),
+				winner.BoxCategories.Name, winnerOpt.Priority,
+				winner.Free, winner.StandBy, you, winner.ID,
+				winnerOpt.WindowOpen.Format("Mon 02 Jan 15:04"))
+		}
+	}
+
+	return b.String(), nil
+}
+
+// writeUserRegistrationsSection lists BOOKED / WAITLIST classes from the
+// already-fetched day maps (same source as /status matching).
+func writeUserRegistrationsSection(b *strings.Builder, allBy map[string][]arboxapi.Class, loc *time.Location, windowStart time.Time, days int) {
+	type line struct {
+		when time.Time
+		text string
+	}
+	var lines []line
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		for _, cl := range allBy[key] {
 			st := cl.YouStatus()
 			if st == "" {
-				st = "open"
+				continue
 			}
-			fmt.Fprintf(&b, "· %s %s pri%d %s → %s | spots %d/%d free %d wl %d | you %s | window %s | id %d\n",
-				o.Weekday.String()[:3], o.Time, o.Priority, optCat,
-				cl.BoxCategories.Name, cl.Registered, cl.MaxUsers, cl.Free, cl.StandBy,
-				st, o.WindowOpen.Format("Mon 02 Jan 15:04"), cl.ID)
-		default:
-			names := make([]string, 0, len(matches))
-			for _, m := range matches {
-				names = append(names, m.BoxCategories.Name)
+			when, err := classStartsAt(cl, key, loc)
+			if err != nil {
+				continue
 			}
-			fmt.Fprintf(&b, "· %s %s pri%d %s → ambiguous: %s | window %s\n",
-				o.Weekday.String()[:3], o.Time, o.Priority, optCat,
-				strings.Join(names, ", "), o.WindowOpen.Format("Mon 02 Jan 15:04"))
+			lines = append(lines, line{
+				when: when,
+				text: fmt.Sprintf("· %s %s · %s · %s · schedule_id %d",
+					when.Weekday().String()[:3],
+					when.Format("Mon 02 Jan 15:04"),
+					cl.BoxCategories.Name,
+					st,
+					cl.ID),
+			})
 		}
 	}
+	sort.Slice(lines, func(i, j int) bool { return lines[i].when.Before(lines[j].when) })
 
-	b.WriteString("\nPreferred per class start (priority winner):\n")
-	type key struct{ Start time.Time }
-	groups := map[time.Time][]schedule.PlannedOption{}
-	var starts []time.Time
-	for _, o := range opts {
-		if _, ok := groups[o.ClassStart]; !ok {
-			starts = append(starts, o.ClassStart)
-		}
-		groups[o.ClassStart] = append(groups[o.ClassStart], o)
+	b.WriteString("A) Already in Arbox (BOOKED = confirmed seat, WAITLIST = waitlist):\n")
+	if len(lines) == 0 {
+		b.WriteString("· none in this window.\n")
+		b.WriteString("  (If you know you have bookings but this stays empty, Arbox may not mark them on this API response for your account.)\n")
+		return
 	}
-	sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
-
-	for _, start := range starts {
-		day := groups[start]
-		sort.SliceStable(day, func(i, j int) bool { return day[i].Priority < day[j].Priority })
-		var winner *arboxapi.Class
-		var winnerOpt schedule.PlannedOption
-		for _, o := range day {
-			matches := resolveOption(o, byDate[o.ClassStart.Format("2006-01-02")], c.CategoryFilter)
-			if len(matches) >= 1 {
-				w := matches[0]
-				winner = &w
-				winnerOpt = o
-				break
-			}
-		}
-		if winner == nil {
-			fmt.Fprintf(&b, "· %s %s → no option matched | window %s\n",
-				start.Weekday().String()[:3],
-				start.Format("Mon 02 Jan 15:04"),
-				day[0].WindowOpen.Format("Mon 02 Jan 15:04"))
-			continue
-		}
-		you := winner.YouStatus()
-		if you == "" {
-			you = "-"
-		}
-		fmt.Fprintf(&b, "· %s %s → %s (pri %d) | free %d wl %d you %s | id %d | window %s\n",
-			start.Weekday().String()[:3],
-			start.Format("Mon 02 Jan 15:04"),
-			winner.BoxCategories.Name, winnerOpt.Priority,
-			winner.Free, winner.StandBy, you, winner.ID,
-			winnerOpt.WindowOpen.Format("Mon 02 Jan 15:04"))
+	for _, ln := range lines {
+		b.WriteString(ln.text)
+		b.WriteByte('\n')
 	}
-	return b.String(), nil
 }

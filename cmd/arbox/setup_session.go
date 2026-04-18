@@ -62,6 +62,42 @@ func deleteSetupSession() error {
 	return err
 }
 
+// seedSetupPicksFromConfig maps the current merged config onto setup
+// candidates (same weekday, time, category substring) so /setup opens with
+// the user's saved plan visibly selected.
+func seedSetupPicksFromConfig(cfg *config.Config, cands map[string][]setupCandidate) map[string][]int {
+	picks := make(map[string][]int)
+	for dayKey, row := range cands {
+		wd, ok := dayKeyToWeekday[dayKey]
+		if !ok {
+			continue
+		}
+		opts := cfg.OptionsFor(wd)
+		if len(opts) == 0 {
+			continue
+		}
+		seenIdx := make(map[int]bool)
+		for _, co := range opts {
+			for i, c := range row {
+				if seenIdx[i] {
+					continue
+				}
+				if c.Time != co.Time {
+					continue
+				}
+				coCat := strings.TrimSpace(co.Category)
+				if coCat != "" && !strings.Contains(strings.ToLower(c.Category), strings.ToLower(coCat)) {
+					continue
+				}
+				picks[dayKey] = append(picks[dayKey], i)
+				seenIdx[i] = true
+				break
+			}
+		}
+	}
+	return picks
+}
+
 func togglePick(s *setupSession, dayKey string, idx int) string {
 	if s.Picks == nil {
 		s.Picks = map[string][]int{}
