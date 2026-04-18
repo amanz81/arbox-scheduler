@@ -152,9 +152,15 @@ func (c *Client) GetSchedule(ctx context.Context, from, to time.Time, locationsB
 // GetScheduleDay fetches a single day's classes. Use this when the API turns
 // out to only return one day at a time regardless of `to`.
 func (c *Client) GetScheduleDay(ctx context.Context, day time.Time, locationsBoxID int) ([]Class, error) {
-	// Normalize to UTC midnight for the given calendar day.
+	// Use midnight in the *same location* as `day` so the calendar date (y,m,d)
+	// matches the member's box timezone. Converting y,m,d to UTC midnight was
+	// wrong (off-by-one vs local days) and led to empty or mismatched classes.
 	y, m, d := day.Date()
-	midnight := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	loc := day.Location()
+	if loc == nil {
+		loc = time.UTC
+	}
+	midnight := time.Date(y, m, d, 0, 0, 0, 0, loc)
 	return c.GetSchedule(ctx, midnight, midnight, locationsBoxID)
 }
 

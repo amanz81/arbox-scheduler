@@ -148,7 +148,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status shows your merged plan, the next class after now, A) BOOKED/WAITLIST in Arbox, then B–C) plan vs live schedule. /setup: ✓/○ toggles from real classes; /setupdone saves user_plan.yaml on the server.")
+	b := notify.EscapeMarkdownV2("/status: quick guide, saved plan, next class, A) your Arbox bookings, B/C) each plan target vs live classes. /setup: ✓/○ toggles; /setupdone saves user_plan.yaml on the server.")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }

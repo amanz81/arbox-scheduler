@@ -247,18 +247,32 @@ func printPreferred(w *os.File, opts []schedule.PlannedOption, byDate map[string
 
 // classStartsAt parses class date+time in loc; empty class.Date uses dayKey.
 func classStartsAt(cl arboxapi.Class, dayKey string, loc *time.Location) (time.Time, error) {
-	dateStr := cl.Date
-	if strings.TrimSpace(dateStr) == "" {
+	dateStr := strings.TrimSpace(cl.Date)
+	if dateStr == "" {
 		dateStr = dayKey
+	} else if i := strings.Index(dateStr, "T"); i > 0 {
+		// API sometimes returns ISO datetime in `date`; keep calendar part only.
+		dateStr = dateStr[:i]
 	}
-	if t, err := time.ParseInLocation("2006-01-02 15:04", dateStr+" "+cl.Time, loc); err == nil {
+	tim := strings.TrimSpace(cl.Time)
+	if tim == "" {
+		return time.Time{}, fmt.Errorf("empty class time")
+	}
+	combo := dateStr + " " + tim
+	for _, lay := range []string{"2006-01-02 15:04", "2006-01-02 15:04:05"} {
+		if t, err := time.ParseInLocation(lay, combo, loc); err == nil {
+			return t, nil
+		}
+	}
+	// e.g. "8:30am" / "2:00pm"
+	if t, err := time.ParseInLocation("2006-01-02 3:04pm", dateStr+" "+strings.ToLower(tim), loc); err == nil {
 		return t, nil
 	}
-	return time.ParseInLocation("2006-01-02 15:04:05", dateStr+" "+cl.Time, loc)
+	return time.Time{}, fmt.Errorf("unparsed time %q date %q", tim, dateStr)
 }
 
 func appendCurrentPlanSummary(b *strings.Builder, c *config.Config) {
-	b.WriteString("Current plan (merged config, including user_plan if present):\n")
+	b.WriteString("Your saved plan (config.yaml + user_plan overlay):\n")
 	n := 0
 	for _, dk := range setupWeekdayOrder {
 		d, ok := c.Days[dk]
@@ -290,7 +304,8 @@ func appendCurrentPlanSummary(b *strings.Builder, c *config.Config) {
 			}
 			parts = append(parts, p)
 		}
-		fmt.Fprintf(b, "· %s: %s\n", pretty, strings.Join(parts, " → "))
+		fmt.Fprintf(b, "· %s — targets in priority order (first wins when booking): %s\n",
+			pretty, strings.Join(parts, "  then  "))
 	}
 	if n == 0 {
 		b.WriteString("· (no days: block in config — only defaults apply)\n")
@@ -303,6 +318,29 @@ func appendCurrentPlanSummary(b *strings.Builder, c *config.Config) {
 		fmt.Fprintf(b, "· category_filter — include: %s exclude: %s\n", strings.Join(inc, ", "), strings.Join(ex, ", "))
 	}
 	b.WriteByte('\n')
+}
+
+func scanScheduleStats(allBy map[string][]arboxapi.Class, flt config.CategoryFilter, loc *time.Location, windowStart time.Time, days int, now time.Time) (total, passFilter, parseOK, futureOK int) {
+	for i := 0; i < days; i++ {
+		d := windowStart.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		for _, cl := range allBy[key] {
+			total++
+			if !classPassesGlobalFilter(cl.BoxCategories.Name, flt) {
+				continue
+			}
+			passFilter++
+			when, err := classStartsAt(cl, key, loc)
+			if err != nil {
+				continue
+			}
+			parseOK++
+			if when.After(now) {
+				futureOK++
+			}
+		}
+	}
+	return total, passFilter, parseOK, futureOK
 }
 
 func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Class, flt config.CategoryFilter, loc *time.Location, windowStart time.Time, days int, now time.Time) {
@@ -330,9 +368,21 @@ func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Cla
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].when.Before(hits[j].when) })
 
-	b.WriteString("Next class after now (category_filter applies):\n")
+	b.WriteString("Next class on Arbox after right now (must pass category_filter):\n")
 	if len(hits) == 0 {
-		b.WriteString("· none in this lookahead.\n\n")
+		tot, passF, pOK, fut := scanScheduleStats(allBy, flt, loc, windowStart, days, now)
+		b.WriteString("· none listed after now in this window.\n")
+		fmt.Fprintf(b, "  Counts for this pull: %d class rows, %d pass filter, %d parseable start time, %d start strictly after now.\n", tot, passF, pOK, fut)
+		if tot == 0 {
+			b.WriteString("  Hint: if everything is 0, the schedule API returned no rows — often a wrong calendar day was requested before; redeploy after the latest fix.\n")
+		} else if passF == 0 {
+			b.WriteString("  Hint: every class name was filtered out — widen category_filter include or check exact names in Arbox.\n")
+		} else if fut == 0 && pOK > 0 {
+			b.WriteString("  Hint: classes are only in the past for this window, or times could not be combined with dates.\n")
+		} else if pOK < passF {
+			b.WriteString("  Hint: some rows had a time/date format we could not parse; set ARBOX_DEBUG=1 and check logs.\n")
+		}
+		b.WriteByte('\n')
 		return
 	}
 	chosen := hits[0]
@@ -394,19 +444,21 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Timezone: %s\nLookahead: %d days\n\n", c.Timezone, days)
+	fmt.Fprintf(&b, "Quick guide:\n"+
+		"· A) Your real bookings in Arbox (BOOKED / WAITLIST).\n"+
+		"· B) Each line is one booking target from the plan; \"no match\" means that day has no class at that clock time with a matching name.\n"+
+		"· C) One line per class slot you care about: the first plan tier that actually found a class (or no tier matched).\n\n")
+
 	appendCurrentPlanSummary(&b, c)
 	appendNextUpcomingClass(&b, allBy, c.CategoryFilter, loc, windowStart, days, now)
-	fmt.Fprintf(&b, "How to read this:\n"+
-		"· A) Classes you already hold in Arbox (BOOKED / WAITLIST).\n"+
-		"· B–C) What your YAML plan wants vs what appears on the schedule (\"no match\" means no class matched that time/category yet).\n\n")
 
 	writeUserRegistrationsSection(&b, allBy, loc, windowStart, days)
 
 	if len(opts) == 0 {
-		fmt.Fprintf(&b, "\nB) Planned booking targets:\n"+
+		fmt.Fprintf(&b, "\nB) Plan vs live schedule (booking targets):\n"+
 			"(No planned options in the next %d days — nothing from user_plan/config to match.)\n\n", days)
 	} else {
-		fmt.Fprintf(&b, "\nB) Planned booking targets (each line = one plan option):\n")
+		fmt.Fprintf(&b, "\nB) Plan vs live schedule (each line = one booking target from your plan):\n")
 		for _, o := range opts {
 			key := o.ClassStart.Format("2006-01-02")
 			matches := resolveOption(o, allBy[key], c.CategoryFilter)
@@ -440,7 +492,7 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 			}
 		}
 
-		b.WriteString("\nC) Preferred per class start (first plan option that matches a live class):\n")
+		b.WriteString("\nC) Best matching class per slot (same slot as B, but only the winning plan tier):\n")
 		groups := map[time.Time][]schedule.PlannedOption{}
 		var starts []time.Time
 		for _, o := range opts {
@@ -466,8 +518,7 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 				}
 			}
 			if winner == nil {
-				fmt.Fprintf(&b, "· %s %s → no option matched | window %s\n",
-					classStart.Weekday().String()[:3],
+				fmt.Fprintf(&b, "· %s → no plan tier matched a live class | window %s\n",
 					classStart.Format("Mon 02 Jan 15:04"),
 					day[0].WindowOpen.Format("Mon 02 Jan 15:04"))
 				continue
@@ -476,8 +527,7 @@ func buildScheduleStatusReport(ctx context.Context, c *config.Config, client *ar
 			if you == "" {
 				you = "-"
 			}
-			fmt.Fprintf(&b, "· %s %s → %s (pri %d) | free %d wl %d you %s | id %d | window %s\n",
-				classStart.Weekday().String()[:3],
+			fmt.Fprintf(&b, "· %s → %s (plan tier pri %d) | free %d wl %d you %s | id %d | window %s\n",
 				classStart.Format("Mon 02 Jan 15:04"),
 				winner.BoxCategories.Name, winnerOpt.Priority,
 				winner.Free, winner.StandBy, you, winner.ID,
