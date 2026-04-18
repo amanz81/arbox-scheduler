@@ -130,6 +130,15 @@ Designed as the container CMD on Fly.io.`,
 						continue
 					}
 					cfg = cfg2
+					ps, _ := readPauseState()
+					nowTick := time.Now().In(loc)
+					if ps.IsActive(nowTick) {
+						fmt.Printf("[tick] %s SKIPPED — %s\n",
+							nowTick.Format("2006-01-02 15:04:05 MST"),
+							ps.Summary(nowTick, loc))
+						maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, "paused · "+ps.Summary(nowTick, loc))
+						continue
+					}
 					summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
 					if err != nil {
 						fmt.Printf("[daemon] tick error: %v\n", err)

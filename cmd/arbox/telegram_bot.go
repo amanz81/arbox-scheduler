@@ -133,6 +133,38 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				if err := tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Weekly available", rep); err != nil {
 					fmt.Printf("[telegram-bot] send weekly: %v\n", err)
 				}
+			case "/pause":
+				loc := cfg.Location()
+				now := time.Now().In(loc)
+				until, reason, perr := parsePauseArgs(args, now, loc)
+				if perr != nil {
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+						"*Pause*\n"+notify.EscapeMarkdownV2(perr.Error()), msg.MessageID)
+					continue
+				}
+				if err := writePauseState(pauseState{PausedUntil: until, Reason: reason, UpdatedAt: now}); err != nil {
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+						"*Pause failed*\n"+notify.EscapeMarkdownV2(err.Error()), msg.MessageID)
+					continue
+				}
+				body := fmt.Sprintf("Paused until %s (~%s).", until.Format("Mon 02 Jan 15:04 MST"), shortDuration(until.Sub(now).Round(time.Minute)))
+				if reason != "" {
+					body += " Reason: " + reason
+				}
+				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+					"*Pause*\n"+notify.EscapeMarkdownV2(body), msg.MessageID)
+			case "/resume":
+				if err := clearPauseState(); err != nil {
+					_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+						"*Resume failed*\n"+notify.EscapeMarkdownV2(err.Error()), msg.MessageID)
+					continue
+				}
+				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+					"*Resume*\n"+notify.EscapeMarkdownV2("Pause cleared. Auto-booking re-enabled."), msg.MessageID)
+			case "/version":
+				body := buildVersionReport(cfg, locID, lookaheadDays)
+				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+					"*Version*\n"+notify.EscapeMarkdownV2(body), msg.MessageID)
 			case "/morning":
 				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, 1)
 				if parseErr != nil {
@@ -171,7 +203,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				}
 			default:
 				h := "*Unknown command*\n" + notify.EscapeMarkdownV2(
-					"Try /start, /help, /status, /morning, /weeklyavailable, /setup, /setupdone, or /setupcancel.")
+					"Try /start, /help, /status, /morning, /weeklyavailable, /setup, /setupdone, /setupcancel, /pause, /resume, /version.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -180,7 +212,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days] — live classes per day (default 06-12, 7 days). /weeklyavailable — next-week live schedule vs plan. /setup + /setupdone save user_plan.yaml on the server.")
+	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days] — live classes per day (default 06-12, 1 day). /weeklyavailable — next-week live schedule vs plan. /setup + /setupdone save user_plan.yaml. /pause [Nh|Nd|until DATE] + /resume control auto-booking. /version shows deployed build + gym + TZ.")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
@@ -222,6 +254,9 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 			{"command": "status", "description": "Selections + your bookings"},
 			{"command": "morning", "description": "Morning classes per day [HH-HH] [days]"},
 			{"command": "weeklyavailable", "description": "Next week live vs plan"},
+			{"command": "pause", "description": "Pause auto-booking [Nh|Nd|until DATE]"},
+			{"command": "resume", "description": "Resume auto-booking"},
+			{"command": "version", "description": "Show deployed version + gym + TZ"},
 			{"command": "setup", "description": "Pick week from real Arbox classes"},
 			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
 			{"command": "setupcancel", "description": "Abort /setup wizard"},

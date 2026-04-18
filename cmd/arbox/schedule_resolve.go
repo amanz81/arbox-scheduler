@@ -702,7 +702,13 @@ func buildStatusShortReport(ctx context.Context, c *config.Config, client *arbox
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Now: %s (%s)\n\n", now.Format("Mon 02 Jan 15:04 MST"), c.Timezone)
+	fmt.Fprintf(&b, "Now: %s (%s)\n", now.Format("Mon 02 Jan 15:04 MST"), c.Timezone)
+	if ps, err := readPauseState(); err == nil {
+		if tag := ps.Summary(now, loc); tag != "" {
+			fmt.Fprintf(&b, "%s\n", tag)
+		}
+	}
+	b.WriteByte('\n')
 	for _, dk := range setupWeekdayOrder {
 		d, ok := c.Days[dk]
 		if !ok {

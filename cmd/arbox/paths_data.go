@@ -33,3 +33,10 @@ func setupSessionPath() string {
 	}
 	return filepath.Join(dataDir(), "setup_session.json")
 }
+
+func pauseStatePath() string {
+	if v := os.Getenv("ARBOX_PAUSE_STATE"); v != "" {
+		return v
+	}
+	return filepath.Join(dataDir(), "pause.json")
+}

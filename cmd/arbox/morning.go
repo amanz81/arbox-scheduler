@@ -62,6 +62,11 @@ func buildMorningReport(ctx context.Context, c *config.Config, client *arboxapi.
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Now: %s (%s)\n", now.Format("Mon 02 Jan 15:04 MST"), c.Timezone)
+	if ps, err := readPauseState(); err == nil {
+		if tag := ps.Summary(now, loc); tag != "" {
+			fmt.Fprintf(&b, "%s\n", tag)
+		}
+	}
 	fmt.Fprintf(&b, "%02d:00–%02d:00, next %d day(s), filter applied.\n", startH, endH, days)
 
 	any := false
