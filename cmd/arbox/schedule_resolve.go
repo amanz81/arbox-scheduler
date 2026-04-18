@@ -147,7 +147,10 @@ func resolveOption(opt schedule.PlannedOption, day []arboxapi.Class, flt config.
 		}
 		name := strings.ToLower(c.BoxCategories.Name)
 
-		// Always apply global excludes.
+		// Global excludes apply to every option, even when this row has an
+		// explicit category (Hall A / Hall B / Weightlifting). Example: if
+		// "Weightlifting" is excluded, a class named "Weightlifting Hall A"
+		// is skipped before Hall A substring matching — so you get "(no match)".
 		skip := false
 		for _, ex := range flt.Exclude {
 			if ex != "" && strings.Contains(name, strings.ToLower(ex)) {

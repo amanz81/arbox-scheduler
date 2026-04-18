@@ -27,7 +27,9 @@ category_filter:
     - "Hall B"
   exclude:
     - "Open"           # skip Open Workout / Open Box
-    - "Weightlifting"  # not my thing at the moment
+    # Do NOT list "Weightlifting" here if you book the Tue 09:00 WL slot:
+    # that word appears in the class title and global excludes run *before*
+    # per-option Hall A/B matching — the whole row becomes "(no match)".
     - "Kids"
     - "Teens"
     - "Mobility"
@@ -48,11 +50,11 @@ days:
       - { time: "08:30", category: "Hall B" }
       - { time: "08:30", category: "Hall A" }
 
-  # Tuesday: default 09:00. Usually only Hall A exists at this slot.
+  # Tuesday: 09:00 is the weightlifting slot (Hall B); Hall A WOD same time if you prefer.
   tuesday:
     enabled: true
     options:
-      - { time: "09:00", category: "Hall B" }
+      - { time: "09:00", category: "Weightlifting" }
       - { time: "09:00", category: "Hall A" }
 
   wednesday:
@@ -65,12 +67,12 @@ days:
       - { time: "08:30", category: "Hall B" }
       - { time: "08:30", category: "Hall A" }
 
-  # Friday: weekend slot at 11:00.
+  # Friday: Hall B at 09:00 (per gym schedule).
   friday:
     enabled: true
     options:
-      - { time: "11:00", category: "Hall B" }
-      - { time: "11:00", category: "Hall A" }
+      - { time: "09:00", category: "Hall B" }
+      - { time: "09:00", category: "Hall A" }
 
   saturday:
     enabled: false  # rest day
