@@ -44,6 +44,7 @@ func main() {
 		newMeCmd(),
 		newDaemonCmd(),
 		newTelegramCmd(),
+		newSelfTestCmd(),
 	)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

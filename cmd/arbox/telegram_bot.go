@@ -172,6 +172,16 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				body := buildVersionReport(cfg, locID, lookaheadDays)
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
 					"*Version*\n"+notify.EscapeMarkdownV2(body), msg.MessageID)
+			case "/selftest":
+				checks := runSelfTest(ctx, cfg, client, locID, lookaheadDays)
+				body := formatSelfTestReport(checks)
+				if next := nextPlannedBookingsSummary(cfg, lookaheadDays, 3); len(next) > 0 {
+					body += "\nNext scheduled bookings:\n"
+					for _, l := range next {
+						body += "  · " + l + "\n"
+					}
+				}
+				_ = tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Self-test", body)
 			case "/morning":
 				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, 1)
 				if parseErr != nil {
@@ -210,7 +220,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 				}
 			default:
 				h := "*Unknown command*\n" + notify.EscapeMarkdownV2(
-					"Try /start, /help, /status, /morning, /evening, /setup, /setupdone, /setupcancel, /pause, /resume, /version.")
+					"Try /start, /help, /status, /morning, /evening, /setup, /setupdone, /setupcancel, /pause, /resume, /version, /selftest.")
 				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID, h, msg.MessageID)
 			}
 		}
@@ -219,7 +229,7 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 
 func helpTelegramBody() string {
 	a := notify.EscapeMarkdownV2("I send booking-window alerts and daemon lifecycle messages here.")
-	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days|week] — live classes (default 06-12, 1 day; e.g. /morning week). /evening [HH-HH] [days|week] — same for evenings (default 16-22). /setup + /setupdone save user_plan.yaml. /pause [Nh|Nd|until DATE] + /resume control auto-booking. /version shows deployed build + gym + TZ.")
+	b := notify.EscapeMarkdownV2("/status — saved selections + your Arbox bookings. /morning [HH-HH] [days|week] — live classes (default 06-12, 1 day; e.g. /morning week). /evening [HH-HH] [days|week] — same for evenings (default 16-22). /setup + /setupdone save user_plan.yaml. /pause [Nh|Nd|until DATE] + /resume control auto-booking. /version shows deployed build + gym + TZ. /selftest runs health checks + lists next scheduled bookings (also included in the daily heartbeat).")
 	c := notify.EscapeMarkdownV2("Tip: tap / in Telegram to open the command menu.")
 	return "*Arbox scheduler*\n\n" + a + "\n\n" + b + "\n\n" + c
 }
@@ -264,6 +274,7 @@ func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
 			{"command": "pause", "description": "Pause auto-booking [Nh|Nd|until DATE]"},
 			{"command": "resume", "description": "Resume auto-booking"},
 			{"command": "version", "description": "Show deployed version + gym + TZ"},
+			{"command": "selftest", "description": "Health check + next scheduled bookings"},
 			{"command": "setup", "description": "Pick week from real Arbox classes"},
 			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
 			{"command": "setupcancel", "description": "Abort /setup wizard"},

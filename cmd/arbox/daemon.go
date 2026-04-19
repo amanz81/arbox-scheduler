@@ -141,7 +141,9 @@ Designed as the container CMD on Fly.io.`,
 						fmt.Printf("[tick] %s SKIPPED — %s\n",
 							nowTick.Format("2006-01-02 15:04:05 MST"),
 							ps.Summary(nowTick, loc))
-						maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, "paused · "+ps.Summary(nowTick, loc))
+						maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay,
+							"paused · "+ps.Summary(nowTick, loc),
+							cfg, client, locID, lookaheadDays)
 						continue
 					}
 					summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
@@ -160,7 +162,7 @@ Designed as the container CMD on Fly.io.`,
 						fmt.Printf("[booker]\n%s\n", bookSummary)
 						summary = strings.TrimSpace(summary + "\n" + bookSummary)
 					}
-					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary)
+					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary, cfg, client, locID, lookaheadDays)
 				}
 			}
 		},
@@ -173,7 +175,19 @@ Designed as the container CMD on Fly.io.`,
 }
 
 // maybeDailyHeartbeat sends at most one EventHeartbeat per local calendar day.
-func maybeDailyHeartbeat(n notify.Notifier, loc *time.Location, lastDay *string, summary string) {
+// Heartbeat body now includes:
+//   * the tick summary (alive · next window …)
+//   * /selftest results (✓/✗ per check)
+//   * next 3 planned bookings (date · category list · window · time-to-window)
+func maybeDailyHeartbeat(
+	n notify.Notifier,
+	loc *time.Location,
+	lastDay *string,
+	summary string,
+	cfg *config.Config,
+	client *arboxapi.Client,
+	locID, days int,
+) {
 	now := time.Now().In(loc)
 	day := now.Format("2006-01-02")
 	if day == *lastDay {
@@ -183,9 +197,22 @@ func maybeDailyHeartbeat(n notify.Notifier, loc *time.Location, lastDay *string,
 	if summary == "" {
 		summary = "no summary"
 	}
+	body := summary
+
+	// Self-test (best-effort; we still send the heartbeat if it errors).
+	if checks := runSelfTest(context.Background(), cfg, client, locID, days); len(checks) > 0 {
+		body += "\n\n" + formatSelfTestReport(checks)
+	}
+	if next := nextPlannedBookingsSummary(cfg, days, 3); len(next) > 0 {
+		body += "\nNext scheduled bookings:\n"
+		for _, l := range next {
+			body += "  · " + l + "\n"
+		}
+	}
+
 	_ = n.Notify(notify.Message{
 		Event: notify.EventHeartbeat,
-		Text:  summary,
+		Text:  body,
 		When:  now,
 	})
 }
