@@ -116,6 +116,10 @@ Designed as the container CMD on Fly.io.`,
 			// safety-net polling.
 			go runProactiveBooker(ctx, loadValidated, client, notifier, locID, lookaheadDays)
 
+			// HTTP API for LLM agents (nanobot / Claude / OpenAI tool-calling).
+			// No-op when ARBOX_API_*_TOKEN env vars are unset.
+			go runHTTPAPI(ctx, loadValidated, client, locID, lookaheadDays)
+
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {

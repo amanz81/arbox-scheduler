@@ -1,0 +1,514 @@
+openapi: 3.1.0
+info:
+  title: arbox-scheduler HTTP API
+  version: "0.1.0"
+  description: |
+    Read + mutate API for the arbox-scheduler daemon. Designed for LLM
+    agents (nanobot / Claude / OpenAI tool-calling) to drive booking,
+    cancellation, waitlist, pause/resume, and plan editing on a single
+    Arbox member account.
+
+    Authentication is HTTP Bearer with two tokens: ARBOX_API_READ_TOKEN
+    (read-only) and ARBOX_API_ADMIN_TOKEN (read+mutate). All mutations
+    additionally require ?confirm=1 on the URL — without it, the handler
+    returns a dry-run preview of the request that *would* have been sent
+    to Arbox and writes an audit-log entry, but does not call Arbox.
+
+    Rate limit: 60 requests / minute per token, burst 30. 429 with
+    Retry-After when exceeded. X-RateLimit-Limit / -Remaining / -Reset
+    headers on every response.
+
+servers:
+  - url: https://arbox-scheduler.fly.dev
+    description: Production (Fly.io)
+  - url: http://localhost:8080
+    description: Local dev
+
+components:
+  securitySchemes:
+    BearerRead:
+      type: http
+      scheme: bearer
+      description: Read-only or admin token (set via ARBOX_API_READ_TOKEN).
+    BearerAdmin:
+      type: http
+      scheme: bearer
+      description: Admin-only token (set via ARBOX_API_ADMIN_TOKEN).
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        code:  { type: string }
+
+    DryRun:
+      type: object
+      properties:
+        would_send:  { type: object, additionalProperties: true }
+        actual_send: { type: boolean }
+        reason:      { type: string }
+
+    Class:
+      type: object
+      properties:
+        schedule_id: { type: integer }
+        time:        { type: string, example: "08:30" }
+        end_time:    { type: string, example: "09:30" }
+        date:        { type: string, example: "2026-04-19" }
+        category:    { type: string }
+        free:        { type: integer }
+        registered:  { type: integer }
+        max_users:   { type: integer }
+        stand_by:    { type: integer }
+        you_status:  { type: string, enum: ["", "BOOKED", "WAITLIST"] }
+        coach:       { type: string }
+
+    PauseInfo:
+      type: object
+      properties:
+        active:  { type: boolean }
+        until:   { type: string, format: date-time, nullable: true }
+        reason:  { type: string }
+        summary: { type: string }
+
+    Version:
+      type: object
+      properties:
+        version:           { type: string }
+        rev:               { type: string }
+        gym:               { type: string }
+        tz:                { type: string }
+        locations_box_id:  { type: integer }
+        lookahead_days:    { type: integer }
+        pause:             { $ref: "#/components/schemas/PauseInfo" }
+
+    SelfTestCheck:
+      type: object
+      properties:
+        name:       { type: string }
+        ok:         { type: boolean }
+        detail:     { type: string }
+        latency_ms: { type: integer }
+
+    SelfTest:
+      type: object
+      properties:
+        checks:        { type: array, items: { $ref: "#/components/schemas/SelfTestCheck" } }
+        next_bookings: { type: array, items: { type: string } }
+
+    Booking:
+      type: object
+      properties:
+        schedule_id: { type: integer }
+        when:        { type: string, format: date-time }
+        category:    { type: string }
+        status:      { type: string, enum: ["BOOKED", "WAITLIST"] }
+
+    BookingAttempt:
+      type: object
+      properties:
+        schedule_id: { type: integer }
+        result:      { type: string, enum: ["BOOKED", "WAITLIST", "FAILED"] }
+        message:     { type: string }
+        when:        { type: string, format: date-time }
+        http_status: { type: integer }
+        slot:        { type: string }
+
+    AuditEntry:
+      type: object
+      properties:
+        ts:          { type: string, format: date-time }
+        route:       { type: string }
+        token_kind:  { type: string, enum: ["read", "admin"] }
+        args:        { type: object, additionalProperties: true }
+        confirm:     { type: boolean }
+        result:      { type: string }
+        schedule_id: { type: integer }
+        latency_ms:  { type: integer }
+        client_ip:   { type: string }
+
+    BookRequest:
+      type: object
+      required: [schedule_id]
+      properties:
+        schedule_id: { type: integer }
+
+    CancelRequest:
+      type: object
+      required: [schedule_user_id]
+      properties:
+        schedule_user_id: { type: integer }
+
+    WaitlistRequest:
+      type: object
+      required: [schedule_id]
+      properties:
+        schedule_id: { type: integer }
+
+    WaitlistLeaveRequest:
+      type: object
+      required: [standby_id]
+      properties:
+        standby_id: { type: integer }
+
+    PauseRequest:
+      type: object
+      properties:
+        duration: { type: string, example: "3d" }
+        until:    { type: string, format: date-time }
+        reason:   { type: string }
+
+    PlanDayRequest:
+      type: object
+      required: [weekday, options]
+      properties:
+        weekday: { type: string, enum: [sunday, monday, tuesday, wednesday, thursday, friday, saturday] }
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              time:     { type: string, example: "08:30" }
+              category: { type: string, example: "Hall B" }
+
+    PlanClearRequest:
+      type: object
+      required: [weekday]
+      properties:
+        weekday: { type: string }
+
+paths:
+  /api/v1/healthz:
+    get:
+      summary: Liveness probe (no auth)
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "503":
+          description: Filesystem / state path unwritable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/openapi.json:
+    get:
+      summary: OpenAPI 3.1 spec for this API (no auth)
+      security: []
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/version:
+    get:
+      summary: Build + gym + tz + pause snapshot
+      security: [{ BearerRead: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+
+  /api/v1/selftest:
+    get:
+      summary: Run health checks (auth, gym, plan, etc.)
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 7 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SelfTest" }
+
+  /api/v1/status:
+    get:
+      summary: Status snapshot — saved plan + live availability
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 7 }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/classes:
+    get:
+      summary: Classes for one calendar day
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, example: "2026-04-19" }
+        - in: query
+          name: filter
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:    { type: string }
+                  classes: { type: array, items: { $ref: "#/components/schemas/Class" } }
+
+  /api/v1/morning:
+    get:
+      summary: Classes in a morning window across N days
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: from
+          schema: { type: integer, default: 6 }
+        - in: query
+          name: to
+          schema: { type: integer, default: 12 }
+        - in: query
+          name: days
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/evening:
+    get:
+      summary: Classes in an evening window across N days
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: from
+          schema: { type: integer, default: 16 }
+        - in: query
+          name: to
+          schema: { type: integer, default: 22 }
+        - in: query
+          name: days
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/bookings:
+    get:
+      summary: Confirmed Arbox bookings (BOOKED + WAITLIST), upcoming
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 14 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bookings: { type: array, items: { $ref: "#/components/schemas/Booking" } }
+
+  /api/v1/plan:
+    get:
+      summary: Current merged config (config.yaml + user_plan.yaml)
+      security: [{ BearerRead: [] }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/attempts:
+    get:
+      summary: Recent terminal booking attempts (BOOKED/WAITLIST/FAILED)
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempts: { type: array, items: { $ref: "#/components/schemas/BookingAttempt" } }
+
+  /api/v1/audit:
+    get:
+      summary: Tail of mutation audit log (newest first)
+      security: [{ BearerRead: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
+
+  /api/v1/book:
+    post:
+      summary: Book a class
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+          description: Required to actually send to Arbox; otherwise returns dry-run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookRequest" }
+      responses:
+        "200":
+          description: Dry-run preview or terminal result
+          content: { application/json: {} }
+
+  /api/v1/cancel:
+    post:
+      summary: Cancel an existing booking
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/waitlist:
+    post:
+      summary: Join the standby (waitlist) for a class
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitlistRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/waitlist/leave:
+    post:
+      summary: Leave a standby list
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WaitlistLeaveRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/pause:
+    post:
+      summary: Pause auto-booking for a duration / until a time
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PauseRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/resume:
+    post:
+      summary: Clear pause
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/plan/day:
+    post:
+      summary: Update one weekday in user_plan.yaml
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanDayRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
+
+  /api/v1/plan/clear:
+    post:
+      summary: Set one weekday to disabled (rest day) in user_plan.yaml
+      security: [{ BearerAdmin: [] }]
+      parameters:
+        - in: query
+          name: confirm
+          schema: { type: integer, enum: [1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlanClearRequest" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: {} }
