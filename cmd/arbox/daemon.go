@@ -145,6 +145,13 @@ Designed as the container CMD on Fly.io.`,
 						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: err.Error()})
 						continue
 					}
+					if bookSummary, berr := runBooker(ctx, cfg, client, notifier, locID, lookaheadDays, nowTick); berr != nil {
+						fmt.Printf("[booker] %v\n", berr)
+						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: "booker: " + berr.Error()})
+					} else if bookSummary != "" {
+						fmt.Printf("[booker]\n%s\n", bookSummary)
+						summary = strings.TrimSpace(summary + "\n" + bookSummary)
+					}
 					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary)
 				}
 			}

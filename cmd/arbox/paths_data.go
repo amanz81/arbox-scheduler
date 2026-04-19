@@ -40,3 +40,10 @@ func pauseStatePath() string {
 	}
 	return filepath.Join(dataDir(), "pause.json")
 }
+
+func bookingAttemptsPath() string {
+	if v := os.Getenv("ARBOX_BOOKING_ATTEMPTS"); v != "" {
+		return v
+	}
+	return filepath.Join(dataDir(), "booking_attempts.json")
+}
