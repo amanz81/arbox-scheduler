@@ -179,6 +179,28 @@ days:
 	}
 }
 
+func TestLoad_EnvOverridesGymAndTimezone(t *testing.T) {
+	path := writeTempConfig(t, `
+timezone: Asia/Jerusalem
+default_time: "09:00"
+gym: ""
+days:
+  monday: { enabled: true, time: "08:30" }
+`)
+	t.Setenv("ARBOX_GYM", "  CrossFit Downtown  ")
+	t.Setenv("ARBOX_TIMEZONE", "Europe/Berlin")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Gym != "CrossFit Downtown" {
+		t.Errorf("ARBOX_GYM not applied: %q", c.Gym)
+	}
+	if c.Timezone != "Europe/Berlin" {
+		t.Errorf("ARBOX_TIMEZONE not applied: %q", c.Timezone)
+	}
+}
+
 func TestCategoryFilter_OneLineFlowStyleSplits(t *testing.T) {
 	path := writeTempConfig(t, `
 timezone: Asia/Jerusalem

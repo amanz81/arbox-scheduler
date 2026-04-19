@@ -53,7 +53,7 @@ The name (`arbox_data`) must match `[mounts].source` in `fly.toml`.
 
 ---
 
-## 3. Set secrets (Arbox credentials)
+## 3. Set secrets (Arbox credentials + optional gym disambiguator)
 
 These are encrypted at rest by Fly and never end up in the image.
 
@@ -62,6 +62,18 @@ fly secrets set \
   ARBOX_EMAIL='you@example.com' \
   ARBOX_PASSWORD='your-arbox-password'
 ```
+
+If your Arbox account belongs to **more than one gym**, also set the gym
+substring so the daemon picks the right box+location every time
+(otherwise discovery picks the first one returned by the API and you may
+end up booking for the wrong gym):
+
+```bash
+fly secrets set ARBOX_GYM='CrossFit Downtown'
+```
+
+`ARBOX_GYM` overrides `gym:` in `config.yaml` and forces re-discovery on
+every call, so a stale `ARBOX_LOCATIONS_BOX_ID` is auto-corrected.
 
 On first boot the daemon will call `/api/v2/user/login` using them,
 discover your box + locations, and write the access/refresh tokens to
@@ -103,17 +115,26 @@ token — then the daemon calls `sendMessage` **to you** (MarkdownV2).
    summary; after that, at most one **heartbeat** per local calendar day.
 
 6. **Slash commands:** the daemon calls Telegram `setMyCommands` on boot.
-   The `/` menu includes **start**, **help**, **status**, **setup**,
-   **setupdone**, and **setupcancel**.
+   The `/` menu includes:
 
-   - **`/status`** — live Arbox snapshot (same idea as `arbox schedule resolve`).
+   - **`/status`** — saved selections per weekday + your real Arbox bookings.
+   - **`/morning [HH-HH] [days|week]`** — live class list (default 06–12, 1 day).
+   - **`/evening [HH-HH] [days|week]`** — live class list (default 16–22, 1 day).
    - **`/setup`** — fetches the **real** class list from Arbox for the next
-     occurrence of each weekday, then sends **inline buttons** so you can
+     occurrence of each weekday and sends **inline buttons** (✓/○) so you can
      toggle which slots belong in your weekly plan (first tapped = highest
      priority). **`/setupdone`** writes the result to
      `user_plan.yaml` on the Fly volume (default: `/data/user_plan.yaml`) and
      the daemon **reloads it every tick** — no restart needed.
-   - **`/setupcancel`** — discards the in-progress session.
+     **`/setupcancel`** — discards the in-progress session.
+   - **`/pause [Nh|Nd|until DATE [HH:MM]] [reason]`** — stop auto-booking
+     (default 24 h, max 90 d). State is persisted to `/data/pause.json`.
+   - **`/resume`** — clear the pause.
+   - **`/version`** — show the deployed git rev, gym, locations_box_id, TZ,
+     pause state. Use this to confirm a redeploy actually shipped.
+   - **`/selftest`** — 8 health checks (auth, gym binding, membership,
+     schedule fetch, attempts file, plan resolution, schedule cache) plus
+     the next 3 scheduled bookings.
 
    Optional env vars (defaults work on Fly with `ARBOX_ENV_FILE=/data/.env`):
 
@@ -156,7 +177,7 @@ You should see output like:
 ```
 [daemon] version=dev interval=1m0s lookahead=7d tz=Asia/Jerusalem
 [tick] 2026-04-17 17:04:01 IDT  locations_box_id=1234
-  next window opens in 14h23m07s @ 2026-04-18 07:30 IDT — Saturday 08:30 (pri=1, cat="Hall A")
+[proactive] next strike at 2026-04-18 08:00:00.000 IDT (in 14h55m59s)
 ```
 
 Open a shell on the machine:
@@ -164,10 +185,13 @@ Open a shell on the machine:
 ```bash
 fly ssh console
 # inside:
+/app/arbox selftest
 /app/arbox me
 /app/arbox schedule resolve --days 7
 cat /data/.env   # tokens are here, owned by the `arbox` user
 ```
+
+Or simply send **`/selftest`** in Telegram — same content, no SSH needed.
 
 ---
 
@@ -179,10 +203,14 @@ cat /data/.env   # tokens are here, owned by the `arbox` user
 | Restart the daemon               | `fly machine restart`                      |
 | Tail logs                        | `fly logs`                                 |
 | Change a secret                  | `fly secrets set ARBOX_PASSWORD=...`       |
+| Switch gym (multi-gym account)   | `fly secrets set ARBOX_GYM='New Gym Name'` |
+| Pause auto-booking (per-day)     | `/pause 3d` in Telegram                    |
+| Pause via infra (immediate)      | `fly scale count 0`                        |
+| Resume                           | `/resume` in Telegram, or `fly scale count 1` |
 | Shell in                         | `fly ssh console`                          |
-| Scale to 0 (pause the scheduler) | `fly scale count 0`                        |
-| Scale back to 1                  | `fly scale count 1`                        |
-| Destroy everything               | `fly apps destroy arbox-scheduler`         |
+| Run health check                 | `/selftest` in Telegram, or `fly ssh console -C '/app/arbox selftest'` |
+| Verify deployed build            | `/version` in Telegram                     |
+| Destroy everything               | `fly apps destroy <your-app-name>`         |
 
 ---
 
@@ -200,6 +228,23 @@ fly secrets set ARBOX_EMAIL='...' ARBOX_PASSWORD='...'
 fly ssh console -C 'rm /data/.env'
 fly machine restart
 ```
+
+**Booking goes to the wrong gym**
+Your Arbox account belongs to multiple gyms and discovery picked the first
+one. Set the gym substring so re-discovery picks the right box+location:
+
+```bash
+fly secrets set ARBOX_GYM='CrossFit Downtown'
+fly ssh console -C 'sed -i /^ARBOX_BOX_ID=/d -e /^ARBOX_LOCATIONS_BOX_ID=/d /data/.env'
+fly machine restart
+```
+
+Then `/selftest` in Telegram — the **Locations API** check should report
+your gym name and the new `locations_box_id`.
+
+**`/version` shows an older git rev than what's on `main`**
+The Fly deploy didn't pick up the latest push — re-run `fly deploy` (or
+re-trigger the GitHub Actions workflow if you've wired one).
 
 **"Out of memory" when building**
 Shouldn't happen with 256 MB for this tiny binary, but if it does, bump

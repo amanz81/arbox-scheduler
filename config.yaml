@@ -18,11 +18,16 @@
 timezone: Asia/Jerusalem
 default_time: "09:00"
 
-# Optional. Case-insensitive substring used to pick the right gym when your
-# Arbox account has more than one (e.g. "Ross Valley" or "Crossfit Ross Valley").
-# Matched against box name and location name. If unset and you have multiple
-# gyms, discovery picks the first one and you may end up with the wrong gym.
-gym: "Rose Valley"
+# Required when your Arbox account belongs to more than one gym (otherwise
+# discovery picks the first one returned by /api/v2/boxes/locations, which
+# may not be yours). Case-insensitive substring matched against the box name
+# and the location name. Examples:
+#   gym: "CrossFit Downtown"
+#   gym: "Tel Aviv"
+#
+# Can also be supplied via the ARBOX_GYM env var (Fly secret) so the repo
+# stays user-agnostic.
+gym: ""
 
 # Global filter: only classes whose category contains one of `include` AND
 # none of `exclude` are considered "real candidates". Applied when an option

@@ -123,6 +123,10 @@ var validDays = []string{
 var hhmmRe = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 
 // Load reads and parses a YAML config file. Call Validate() for semantic checks.
+//
+// Environment overrides (applied AFTER YAML parse, so they win):
+//   ARBOX_GYM       — overrides `gym:` (substring match for multi-gym accounts)
+//   ARBOX_TIMEZONE  — overrides `timezone:` (e.g. "Europe/Berlin")
 func Load(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -131,6 +135,12 @@ func Load(path string) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if env := strings.TrimSpace(os.Getenv("ARBOX_GYM")); env != "" {
+		c.Gym = env
+	}
+	if env := strings.TrimSpace(os.Getenv("ARBOX_TIMEZONE")); env != "" {
+		c.Timezone = env
 	}
 	return &c, nil
 }
