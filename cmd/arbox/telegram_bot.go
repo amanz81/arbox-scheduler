@@ -263,24 +263,39 @@ type tgIncomingMessage struct {
 	} `json:"chat"`
 }
 
+// telegramCommand is one slash command registered with Telegram via
+// setMyCommands AND handled by the dispatcher in runTelegramCommandBot.
+// telegramCommandList is the SINGLE SOURCE OF TRUTH; a regression test
+// verifies every entry has a matching switch `case "/<name>"` and vice versa.
+type telegramCommand struct {
+	Name        string // without leading "/"
+	Description string // appears in Telegram's "/" menu
+}
+
+var telegramCommandList = []telegramCommand{
+	{"start", "About this bot"},
+	{"help", "List commands"},
+	{"status", "Selections + your bookings"},
+	{"morning", "Morning classes [HH-HH] [days|week]"},
+	{"evening", "Evening classes [HH-HH] [days|week]"},
+	{"pause", "Pause auto-booking [Nh|Nd|until DATE]"},
+	{"resume", "Resume auto-booking"},
+	{"version", "Show deployed version + gym + TZ"},
+	{"selftest", "Health check + next scheduled bookings"},
+	{"setup", "Pick week from real Arbox classes"},
+	{"setupdone", "Save picks to user_plan.yaml"},
+	{"setupcancel", "Abort /setup wizard"},
+}
+
 func tgSetMyCommands(ctx context.Context, hc *http.Client, base string) error {
-	payload := map[string]any{
-		"commands": []map[string]string{
-			{"command": "start", "description": "About this bot"},
-			{"command": "help", "description": "List commands"},
-			{"command": "status", "description": "Selections + your bookings"},
-			{"command": "morning", "description": "Morning classes [HH-HH] [days|week]"},
-			{"command": "evening", "description": "Evening classes [HH-HH] [days|week]"},
-			{"command": "pause", "description": "Pause auto-booking [Nh|Nd|until DATE]"},
-			{"command": "resume", "description": "Resume auto-booking"},
-			{"command": "version", "description": "Show deployed version + gym + TZ"},
-			{"command": "selftest", "description": "Health check + next scheduled bookings"},
-			{"command": "setup", "description": "Pick week from real Arbox classes"},
-			{"command": "setupdone", "description": "Save picks to user_plan.yaml"},
-			{"command": "setupcancel", "description": "Abort /setup wizard"},
-		},
+	cmds := make([]map[string]string, 0, len(telegramCommandList))
+	for _, c := range telegramCommandList {
+		cmds = append(cmds, map[string]string{
+			"command":     c.Name,
+			"description": c.Description,
+		})
 	}
-	return tgPostJSON(ctx, hc, base+"/setMyCommands", payload)
+	return tgPostJSON(ctx, hc, base+"/setMyCommands", map[string]any{"commands": cmds})
 }
 
 func tgGetUpdates(ctx context.Context, hc *http.Client, base string, offset int64) ([]tgUpdate, error) {
