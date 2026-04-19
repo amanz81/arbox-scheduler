@@ -7,7 +7,8 @@
 #        Settings -> Secrets and variables -> Actions -> New repository secret
 #
 # After that every `git push origin main` triggers a rebuild + deploy.
-# PRs get a dry-run (fly deploy --dry-run) so you see the plan without shipping.
+# PRs get a build-only run (`fly deploy --build-only`) so the Dockerfile
+# + build args are validated without changing the running app.
 # Manual runs are available via the Actions tab (workflow_dispatch).
 
 name: Fly Deploy
@@ -53,7 +54,10 @@ jobs:
           FULL_SHA: ${{ github.sha }}
         run: echo "short=${FULL_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy (dry-run on PRs)
+      # Validate-only on PRs: build the image on Fly's remote builder using
+      # the same Dockerfile + build args as the real deploy, but don't ship.
+      # Replaces the old `--dry-run` flag which flyctl removed in 0.4.x.
+      - name: Build only (PRs)
         if: github.event_name == 'pull_request'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -63,8 +67,7 @@ jobs:
           flyctl deploy \
             --app arbox-scheduler \
             --remote-only \
-            --ha=false \
-            --dry-run \
+            --build-only \
             --build-arg "VERSION=$VERSION"
 
       - name: Deploy (real on main)
