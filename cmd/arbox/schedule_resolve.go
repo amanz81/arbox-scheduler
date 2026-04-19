@@ -481,7 +481,7 @@ func fetchScheduleWindow(ctx context.Context, c *config.Config, client *arboxapi
 			allBy[key] = []arboxapi.Class{}
 		}
 		ctx2, cancel := context.WithTimeout(ctx, 20*time.Second)
-		classes, err := client.GetScheduleDay(ctx2, d, locID)
+		classes, err := getScheduleDayCached(ctx2, client, d, locID)
 		cancel()
 		if err != nil {
 			return nil, time.Time{}, time.Time{}, nil, fmt.Errorf("fetch %s: %w", key, err)

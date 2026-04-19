@@ -191,6 +191,11 @@ func runSelfTest(ctx context.Context, cfg *config.Config, client *arboxapi.Clien
 		return fmt.Sprintf("%d options across %d days", len(opts), days), nil
 	})
 
+	add("Schedule cache", func() (string, error) {
+		entries, ttl := scheduleCacheStats()
+		return fmt.Sprintf("%d entries, TTL=%s", entries, ttl), nil
+	})
+
 	return out
 }
 

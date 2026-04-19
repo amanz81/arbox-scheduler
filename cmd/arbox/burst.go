@@ -18,11 +18,12 @@ import (
 const (
 	burstDuration = 45 * time.Second
 	burstInterval = 1 * time.Second
-	// burstFetchEvery N attempts re-fetches the schedule. The fetch costs
-	// ~250-600ms; if we re-fetch every attempt we slow the loop. Caching the
-	// last fetch and re-fetching every 3rd attempt gives fresh `free` counts
-	// without hurting reaction time.
-	burstFetchEvery = 3
+	// burstFetchEvery N attempts re-fetches the schedule. We do not strictly
+	// need a fresh fetch to keep trying — BookClass returns the authoritative
+	// outcome — but a periodic refresh keeps the priority logic honest if a
+	// higher-priority slot frees up mid-burst. 5 = ~9 fetches per 45s, ~12/min
+	// peak (well under the typical 60/min Arbox member API budget).
+	burstFetchEvery = 5
 )
 
 // bookSlotBurst aggressively retries the priority list for ONE specific
