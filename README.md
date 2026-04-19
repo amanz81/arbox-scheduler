@@ -270,6 +270,39 @@ No public HTTP port. Outbound only. State is on a 1 GB Fly volume.
 
 ---
 
+## Booking timeline (when does `BookClass` actually fire?)
+
+The proactive scheduler does **not** fire 10 s before the window — that
+would just earn a *"registration not yet open"* error. It fires **~250 ms
+before** `WindowOpen` so the request lands at the Arbox server right at, or
+just after, the window opens.
+
+For a window of `T = 08:00:00.000` (Israel time):
+
+| Clock | Action | Constant |
+|---|---|---|
+| `T − 8 s` | Wake; reload config; check `/pause`; **auth probe** (1 GET) so a stale token re-logins now, not at the strike | `proactiveLead = 8s` |
+| `T − 250 ms` | `STRIKE` log line; **first `BookClass` POST** sent | `proactiveStrikeOffset = 250ms` |
+| `T + ~0–600 ms` | API receives the POST right around `T` (the offset compensates for clock skew + network RTT) | – |
+| every `+1 s` after | Next attempt: `BookClass` for the next priority tier, or `JoinWaitlist` if class is full | `burstInterval = 1s` |
+| stop | First `BOOKED`/`WAITLIST` **or** `T + 45 s` **or** `ClassStart − 1 s` | `burstDuration = 45s` |
+
+Why **not** fire 10 s early: an early POST returns *"registration not yet
+open"* and burns a retry slot for nothing. **250 ms** is the smallest
+offset that's:
+
+- big enough to cover **clock skew** (Fly VM clock vs Arbox server clock),
+- big enough to cover **network RTT** (~60–120 ms from Fly Frankfurt to Israel),
+- small enough that the API server-side timestamp lands **at or just after** `WindowOpen`.
+
+If you ever see `❌ Booking failed` with a *"not open"* message, **raise**
+`proactiveStrikeOffset` (e.g. 350 ms). If your gym sells out so fast that
+even 250 ms loses, **lower** it (e.g. 100 ms). Both live in
+`cmd/arbox/proactive.go`; we can also wire them as `daemon` flags so you
+can tune without redeploys.
+
+---
+
 ## Tuning + rate limits
 
 We don't have a published Arbox rate limit, so the defaults are
