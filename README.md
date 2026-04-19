@@ -26,13 +26,14 @@ Tier VM**, ~7 MB RSS) and is controlled end-to-end from **Telegram**.
 4. [Updating the code](#updating-the-code)
 5. [Configuration](#configuration)
 6. [Telegram commands](#telegram-commands)
-7. [Multi-user variables](#multi-user-variables)
-8. [Architecture in 30 seconds](#architecture-in-30-seconds)
-9. [Nanobot / MCP integration (same host)](#nanobot--mcp-integration-same-host)
-10. [Tuning + rate limits](#tuning--rate-limits)
-11. [Security](#security)
-12. [Development](#development)
-13. [Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby)
+7. [HTTP API (LLM agents / nanobot)](#http-api-llm-agents--nanobot)
+8. [Multi-user variables](#multi-user-variables)
+9. [Architecture in 30 seconds](#architecture-in-30-seconds)
+10. [Nanobot / MCP integration (same host)](#nanobot--mcp-integration-same-host)
+11. [Tuning + rate limits](#tuning--rate-limits)
+12. [Security](#security)
+13. [Development](#development)
+14. [Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby)
 
 ---
 
@@ -269,6 +270,33 @@ Notifications you'll receive automatically:
 - `⚠️ *Daemon error*` — for tick or booker errors
 
 Only the chat id matching `TELEGRAM_CHAT_ID` is allowed to send commands.
+
+---
+
+## HTTP API (LLM agents / nanobot)
+
+The daemon also serves a small REST surface at `/api/v1/` for nanobot /
+Claude / OpenAI tool-calling. It runs in the same process as everything
+else; no extra service to operate.
+
+- Two-tier bearer auth: `ARBOX_API_READ_TOKEN` (GETs only) and
+  `ARBOX_API_ADMIN_TOKEN` (everything).
+- Mutations require `?confirm=1` on the URL on top of the admin token.
+- 60 req/min per token, burst 30. `/data/audit.jsonl` records every
+  mutation.
+- OpenAPI 3.1 spec at `/api/v1/openapi.json`.
+- Disabled (server doesn't start) if both API tokens are unset.
+
+See:
+
+- [docs/API.md](docs/API.md) — endpoint reference + curl examples.
+- [docs/NANOBOT.md](docs/NANOBOT.md) — exact nanobot config snippet.
+
+```bash
+fly secrets set \
+  ARBOX_API_READ_TOKEN="$(openssl rand -hex 32)" \
+  ARBOX_API_ADMIN_TOKEN="$(openssl rand -hex 32)"
+```
 
 ---
 
