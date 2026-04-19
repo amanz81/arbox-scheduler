@@ -128,15 +128,15 @@ func runProactiveBooker(
 			time.Now().In(loc).Format("15:04:05.000 MST"),
 			nextWin.Format("15:04:05.000 MST"))
 
+		// Identify every ClassStart whose WindowOpen is exactly nextWin (a
+		// single Sunday 08:00 slot has multiple priority options sharing the
+		// same WindowOpen). Burst-attack only those slots, not unrelated ones.
+		targets := slotsAtWindow(cfg, time.Now().In(loc), days, nextWin)
 		bookerMu.Lock()
-		summary, berr := runBooker(ctx, cfg, client, notifier, locID, days, time.Now().In(loc))
-		bookerMu.Unlock()
-		if berr != nil {
-			fmt.Printf("[proactive] booker error: %v\n", berr)
-			_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: "proactive booker: " + berr.Error()})
-		} else if summary != "" {
-			fmt.Printf("[proactive]\n%s\n", summary)
+		for _, target := range targets {
+			bookSlotBurst(ctx, cfg, client, notifier, locID, target)
 		}
+		bookerMu.Unlock()
 
 		// Small breather so very close windows (back-to-back) don't tight-loop.
 		if !sleepOrDone(ctx, 750*time.Millisecond) {
@@ -167,6 +167,33 @@ func nextActionableWindow(cfg *config.Config, now time.Time, days int) (time.Tim
 		return o.WindowOpen, nil
 	}
 	return time.Time{}, nil
+}
+
+// slotsAtWindow returns every distinct ClassStart whose WindowOpen equals
+// (or is within 1s of) `target`. Multiple priority options share a single
+// ClassStart and we want to burst that ClassStart only once.
+func slotsAtWindow(cfg *config.Config, now time.Time, days int, target time.Time) []time.Time {
+	opts, err := schedule.NextOptions(cfg, now, days)
+	if err != nil {
+		return nil
+	}
+	seen := map[time.Time]bool{}
+	var out []time.Time
+	for _, o := range opts {
+		diff := o.WindowOpen.Sub(target)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > time.Second {
+			continue
+		}
+		if seen[o.ClassStart] {
+			continue
+		}
+		seen[o.ClassStart] = true
+		out = append(out, o.ClassStart)
+	}
+	return out
 }
 
 // sleepOrDone returns true if the sleep completed normally, false on context
