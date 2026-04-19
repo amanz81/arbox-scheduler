@@ -1,0 +1,20 @@
+# CODEOWNERS — auto-request reviews from the listed user(s) on PRs that
+# touch the matching paths.
+#
+# Important: GitHub *never* lets PR authors approve their own PRs, no
+# matter what CODEOWNERS says. This file only matters when SOMEONE ELSE
+# opens a PR — they'll get @amanz81 added as a requested reviewer.
+# If you're solo, this file is mostly forward-looking documentation.
+#
+# Repository-wide owner: any unmatched path falls through to this rule.
+*                          @amanz81
+
+# Sensitive areas — explicit ownership so a reviewer is always pulled in
+# even if a future ruleset is loosened.
+/cmd/arbox/                 @amanz81
+/internal/                  @amanz81
+/.github/                   @amanz81
+/Dockerfile                 @amanz81
+/fly.toml                   @amanz81
+/config.yaml                @amanz81
+/.env.example               @amanz81
