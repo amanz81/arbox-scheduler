@@ -138,6 +138,10 @@ func alreadyHoldsAtStart(classes []arboxapi.Class, start time.Time, loc *time.Lo
 // but whose class hasn't started yet. It respects a persisted attempts file so
 // each schedule_id is only acted on once.
 //
+// Concurrency note: the proactive scheduler holds bookerMu while calling this
+// and the 5-min ticker calls it under the same lock — the two paths can never
+// fire BookClass for the same id simultaneously.
+//
 // Returns a short multi-line summary suitable for the daily heartbeat.
 func runBooker(
 	ctx context.Context,

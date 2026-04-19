@@ -111,6 +111,11 @@ Designed as the container CMD on Fly.io.`,
 				}
 			}
 
+			// Proactive scheduler: wakes precisely at every WindowOpen and
+			// triggers runBooker so popular slots aren't missed by the 5-min
+			// safety-net polling.
+			go runProactiveBooker(ctx, loadValidated, client, notifier, locID, lookaheadDays)
+
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
@@ -145,7 +150,10 @@ Designed as the container CMD on Fly.io.`,
 						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: err.Error()})
 						continue
 					}
-					if bookSummary, berr := runBooker(ctx, cfg, client, notifier, locID, lookaheadDays, nowTick); berr != nil {
+					bookerMu.Lock()
+					bookSummary, berr := runBooker(ctx, cfg, client, notifier, locID, lookaheadDays, nowTick)
+					bookerMu.Unlock()
+					if berr != nil {
 						fmt.Printf("[booker] %v\n", berr)
 						_ = notifier.Notify(notify.Message{Event: notify.EventError, Text: "booker: " + berr.Error()})
 					} else if bookSummary != "" {
