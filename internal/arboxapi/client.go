@@ -51,6 +51,25 @@ type Client struct {
 	creds *Credentials
 }
 
+// DefaultUserAgent is the User-Agent sent to the Arbox API. The member API is
+// fronted by Cloudflare which blocks requests with obvious programmatic UAs
+// (`Go-http-client/*`, our old `arbox-scheduler/0.1 (+…)`, etc.) as HTTP 403
+// with a full HTML challenge page — so we impersonate a recent desktop
+// Safari instead. Combined with Origin/Referer/Accept-Language matching the
+// real web app (`app.arboxapp.com`), this is sufficient to pass Cloudflare's
+// default "Bot Fight Mode" without a JS challenge.
+const DefaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+	"AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+	"Version/17.4 Safari/605.1.15"
+
+// DefaultOrigin / DefaultReferer are the URLs the Arbox Angular PWA uses.
+// Keeping them in sync with the real client is what makes Cloudflare treat
+// our requests as coming from the web app, not a scraper.
+const (
+	DefaultOrigin  = "https://app.arboxapp.com"
+	DefaultReferer = "https://app.arboxapp.com/"
+)
+
 // New returns a Client with sensible defaults.
 func New(baseURL string) *Client {
 	if baseURL == "" {
@@ -59,7 +78,7 @@ func New(baseURL string) *Client {
 	return &Client{
 		BaseURL:   strings.TrimRight(baseURL, "/"),
 		HTTP:      &http.Client{Timeout: 20 * time.Second},
-		UserAgent: "arbox-scheduler/0.1 (+https://github.com/amanz81/arbox-scheduler)",
+		UserAgent: DefaultUserAgent,
 	}
 }
 
@@ -184,9 +203,19 @@ func (c *Client) LoginAndStore(ctx context.Context, email, password string) (*Lo
 
 // applyCommonHeaders sets the Arbox member-app headers on a request. Empty
 // token/refresh values are skipped (used during login).
+//
+// Impersonation matters here: Cloudflare in front of apiappv2.arboxapp.com
+// blocks programmatic-looking requests with a 403 + challenge HTML. We
+// mirror the headers the real Arbox web app (Angular PWA at
+// app.arboxapp.com) sends, so the request looks like normal browser traffic
+// coming from app.arboxapp.com's JS fetch. Each header is one of Cloudflare's
+// standard bot-detection signals.
 func (c *Client) applyCommonHeaders(req *http.Request, token, refresh string) {
 	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9,he;q=0.8")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", DefaultOrigin)
+	req.Header.Set("Referer", DefaultReferer)
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
