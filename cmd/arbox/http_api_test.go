@@ -49,9 +49,9 @@ func newTestServer(t *testing.T, readTok, adminTok string, upstream http.Handler
 			_, _ = w.Write([]byte(`{"data":{"id":777}}`))
 		case strings.HasSuffix(r.URL.Path, "/api/v2/scheduleUser/cancel"):
 			_, _ = w.Write([]byte(`{"data":{"id":777}}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v2/standBy/insert"):
+		case strings.HasSuffix(r.URL.Path, "/api/v2/scheduleStandBy/insert"):
 			_, _ = w.Write([]byte(`{"data":{"id":777}}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v2/standBy/cancel"):
+		case strings.HasSuffix(r.URL.Path, "/api/v2/scheduleStandBy/delete"):
 			_, _ = w.Write([]byte(`{"data":{"id":777}}`))
 		case strings.HasSuffix(r.URL.Path, "/api/v2/schedule/betweenDates"):
 			_, _ = w.Write([]byte(`{"data":[]}`))

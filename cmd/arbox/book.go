@@ -34,8 +34,8 @@ and make no network mutation. Use --send to actually perform the action.
 Endpoints (from the member app):
   POST /api/v2/scheduleUser/insert  — confirmed book
   POST /api/v2/scheduleUser/cancel  — best guess cancel
-  POST /api/v2/standBy/insert       — best guess join waitlist
-  POST /api/v2/standBy/cancel       — best guess leave waitlist`,
+  POST /api/v2/scheduleStandBy/insert — join waitlist
+  POST /api/v2/scheduleStandBy/delete — leave waitlist`,
 	}
 
 	waitlist := &cobra.Command{

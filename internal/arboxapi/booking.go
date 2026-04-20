@@ -11,8 +11,14 @@ package arboxapi
 //   - GET  /api/v2/user/feed                      USER FEED     confirmed [1]
 //   - POST /api/v2/scheduleUser/cancel            CANCEL        BEST GUESS — not yet
 //                                                                verified against live API
-//   - POST /api/v2/standBy/insert                 WAITLIST+     BEST GUESS
-//   - POST /api/v2/standBy/cancel                 WAITLIST-     BEST GUESS
+//   - POST /api/v2/scheduleStandBy/insert         WAITLIST+     discovered via probe [2]
+//   - POST /api/v2/scheduleStandBy/delete         WAITLIST-     discovered via probe [2]
+//
+// [2] On 2026-04-20 we observed HTTP 404 from Arbox when calling the older
+//     /api/v2/standBy/insert. Probed /api/v2/scheduleStandBy/{insert,delete}
+//     with GET via the arbox-query passthrough — got 405 "GET method not
+//     supported" (i.e. routes exist, expect POST). Arbox renamed the
+//     surface; these are the new paths.
 //
 // [1] https://github.com/oribenez/auto-enroll-arbox/blob/master/lib/arbox.js
 //
@@ -194,7 +200,8 @@ func (c *Client) CancelBooking(ctx context.Context, scheduleUserID int, dryRun b
 }
 
 // JoinWaitlist puts the user on the standby list for a class that's full.
-// Endpoint is a best guess until we see the real one.
+// Uses /api/v2/scheduleStandBy/insert — see booking.go header for how the
+// route was rediscovered after Arbox renamed it in April 2026.
 func (c *Client) JoinWaitlist(ctx context.Context, membershipUserID, scheduleID int, dryRun bool) (*MutationResult, error) {
 	body := map[string]int{
 		"membership_user_id": membershipUserID,
@@ -203,30 +210,30 @@ func (c *Client) JoinWaitlist(ctx context.Context, membershipUserID, scheduleID 
 	reqJSON, _ := json.MarshalIndent(body, "", "  ")
 	res := &MutationResult{
 		Method:      http.MethodPost,
-		URL:         c.BaseURL + "/api/v2/standBy/insert",
+		URL:         c.BaseURL + "/api/v2/scheduleStandBy/insert",
 		RequestJSON: string(reqJSON),
 	}
 	if dryRun {
 		return res, nil
 	}
-	return c.sendMutation(ctx, res, http.MethodPost, "/api/v2/standBy/insert", body)
+	return c.sendMutation(ctx, res, http.MethodPost, "/api/v2/scheduleStandBy/insert", body)
 }
 
 // LeaveWaitlist removes the user from a standby list. `standbyID` is what
 // the schedule payload returns as `user_in_standby`.
-// Endpoint is a best guess until we see the real one.
+// Uses /api/v2/scheduleStandBy/delete — see booking.go header.
 func (c *Client) LeaveWaitlist(ctx context.Context, standbyID int, dryRun bool) (*MutationResult, error) {
 	body := map[string]int{"stand_by_id": standbyID}
 	reqJSON, _ := json.MarshalIndent(body, "", "  ")
 	res := &MutationResult{
 		Method:      http.MethodPost,
-		URL:         c.BaseURL + "/api/v2/standBy/cancel",
+		URL:         c.BaseURL + "/api/v2/scheduleStandBy/delete",
 		RequestJSON: string(reqJSON),
 	}
 	if dryRun {
 		return res, nil
 	}
-	return c.sendMutation(ctx, res, http.MethodPost, "/api/v2/standBy/cancel", body)
+	return c.sendMutation(ctx, res, http.MethodPost, "/api/v2/scheduleStandBy/delete", body)
 }
 
 // sendMutation is shared by all the write helpers. It uses doJSON's retry-on-

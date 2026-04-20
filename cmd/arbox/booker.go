@@ -27,6 +27,18 @@ const (
 
 // bookingAttempt is one persisted record per `schedule_id` so the daemon does
 // not retry the same class forever every tick.
+//
+// Terminal + TerminalUntil exist to stop the per-minute retry storm that hits
+// when Arbox rejects a booking for a reason retry can't fix — e.g. the class
+// requires a medical waiver the user hasn't signed yet (HTTP 514 with
+// `messageToUser.name: medicalWavierRestricted`). Without these fields, the
+// safety-net booker tries again on the next tick and floods Telegram with
+// identical "booking failed" messages.
+//
+// A terminal failure still expires (default 6 hours via TerminalBackoff) so
+// the daemon tries once more after the user has had time to sign the form /
+// change their plan / etc. 6 h is a compromise between "re-notify promptly
+// when things change" and "don't spam if the user is asleep".
 type bookingAttempt struct {
 	ScheduleID int           `json:"schedule_id"`
 	Result     bookingResult `json:"result"`
@@ -34,6 +46,28 @@ type bookingAttempt struct {
 	When       time.Time     `json:"when"`
 	HTTPStatus int           `json:"http_status,omitempty"`
 	Slot       string        `json:"slot,omitempty"` // YYYY-MM-DD HH:MM Category
+	// Terminal flags a failure that will not change on retry (see type doc).
+	Terminal bool `json:"terminal,omitempty"`
+	// TerminalUntil is when we'll let the booker try this schedule_id again
+	// after a terminal failure. Zero when Terminal is false.
+	TerminalUntil time.Time `json:"terminal_until,omitempty"`
+}
+
+// TerminalBackoff is how long we consider a terminal failure "fresh" — for
+// this long after the failure we skip the class on every tick. After that
+// we let the booker try once more, which either succeeds (user fixed the
+// underlying issue) or records a new terminal attempt with a fresh window.
+const TerminalBackoff = 6 * time.Hour
+
+// isTerminalHTTP returns true when the response status unambiguously means
+// "retrying won't help without user action" — currently HTTP 514, which
+// Arbox uses to signal business-rule failures (medicalWavierRestricted,
+// planNotAllowed, scheduleFullForMember, etc. — all surfaced with a
+// `messageToUser` the API consumer is expected to show the member). Other
+// 4xx / 5xx stay retriable because they often ARE transient (Cloudflare
+// hiccup, rate-limit, stale token the client can re-login).
+func isTerminalHTTP(status int) bool {
+	return status == 514
 }
 
 // attemptsState is the on-disk shape: map keyed by schedule_id.
@@ -238,12 +272,25 @@ func runBooker(
 				acted = true
 				break
 			}
-			if prev, ok := state.Attempts[cl.ID]; ok && prev.Result != resultFailed {
-				summaryLines = append(summaryLines,
-					fmt.Sprintf("%s %s %s (id %d) — prior %s, skipping",
-						dayKey, hhmm(cl.Time), cl.ResolvedCategoryName(), cl.ID, prev.Result))
-				acted = true
-				break
+			if prev, ok := state.Attempts[cl.ID]; ok {
+				// Skip if we already succeeded (BOOKED/WAITLIST) — never retry
+				// a won slot. Also skip terminal failures within their backoff
+				// window so a medicalWavierRestricted / planNotAllowed / etc.
+				// doesn't spam Telegram every 60 s.
+				skip := prev.Result != resultFailed ||
+					(prev.Terminal && now.Before(prev.TerminalUntil))
+				if skip {
+					reason := string(prev.Result)
+					if prev.Terminal {
+						reason = fmt.Sprintf("%s (terminal, retry after %s)",
+							prev.Result, prev.TerminalUntil.Format("15:04"))
+					}
+					summaryLines = append(summaryLines,
+						fmt.Sprintf("%s %s %s (id %d) — prior %s, skipping",
+							dayKey, hhmm(cl.Time), cl.ResolvedCategoryName(), cl.ID, reason))
+					acted = true
+					break
+				}
 			}
 
 			mid, err := resolveMember()
@@ -332,6 +379,10 @@ func tryBookOnce(
 	if err != nil && att.Message == "" {
 		att.Message = err.Error()
 	}
+	if isTerminalHTTP(att.HTTPStatus) {
+		att.Terminal = true
+		att.TerminalUntil = now.Add(TerminalBackoff)
+	}
 	return att, fmt.Sprintf("%s — book FAILED (id %d): %s", slotLabel, cl.ID, att.Message)
 }
 
@@ -359,6 +410,10 @@ func tryWaitlistOnce(
 	att.Result = resultFailed
 	if err != nil && att.Message == "" {
 		att.Message = err.Error()
+	}
+	if isTerminalHTTP(att.HTTPStatus) {
+		att.Terminal = true
+		att.TerminalUntil = now.Add(TerminalBackoff)
 	}
 	return att
 }
