@@ -1,5 +1,21 @@
 # Deploying arbox-scheduler to Fly.io
 
+> **⚠️ Legacy / cold-standby only. Current production target is Oracle
+> Cloud Free Tier — see [`DEPLOY-ORACLE.md`](DEPLOY-ORACLE.md).**
+>
+> This guide is kept because the Fly app (`arbox-scheduler.fly.dev`,
+> machine `185947ea234548` in `fra`, volume `vol_vz8kqqjlyo97n5jv`) is
+> still provisioned in the **stopped** state as a rollback target, and
+> the instructions below are accurate for re-creating it from scratch.
+>
+> **Known issue:** Cloudflare's bot-fight-mode rules blocked
+> `apiappv2.arboxapp.com` from Fly's Frankfurt ASN starting April 2026,
+> so a Fly-hosted daemon currently gets HTTP 403 on every Arbox call.
+> Even with realistic browser headers (merged in PR #3), Frankfurt IPs
+> fail the TLS JA3 + reputation score. Migrating back is only viable if
+> either (a) Fly moves the app to a different ASN, (b) Cloudflare
+> loosens the rule, or (c) we proxy through a residential IP.
+
 This is the one-shot walkthrough for getting the daemon running on Fly.io
 with a persistent volume (so tokens survive restarts).
 

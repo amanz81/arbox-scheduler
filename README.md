@@ -2,8 +2,8 @@
 
 A Go CLI + always-on daemon that **auto-books your weekly classes on
 [Arbox](https://arboxapp.com/)** the moment the booking window opens.
-Designed to deploy as a tiny Fly.io worker (or run on any Linux host) and
-controlled end-to-end from **Telegram**.
+Runs on a tiny Linux host (current production target: **Oracle Cloud Free
+Tier VM**, ~7 MB RSS) and is controlled end-to-end from **Telegram**.
 
 - 24h booking window for most weekdays, **48h on Sunday** — handled per class.
 - **Proactive scheduler:** wakes ~8 s before each window, then retries every
@@ -22,14 +22,17 @@ controlled end-to-end from **Telegram**.
 
 1. [What it does](#what-it-does)
 2. [Quick start (local)](#quick-start-local)
-3. [Quick start (Fly.io)](#quick-start-flyio)
-4. [Configuration](#configuration)
-5. [Telegram commands](#telegram-commands)
-6. [Multi-user variables](#multi-user-variables)
-7. [Architecture in 30 seconds](#architecture-in-30-seconds)
-8. [Tuning + rate limits](#tuning--rate-limits)
-9. [Security](#security)
-10. [Development](#development)
+3. [Quick start (Oracle VM — current production)](#quick-start-oracle-vm--current-production)
+4. [Updating the code](#updating-the-code)
+5. [Configuration](#configuration)
+6. [Telegram commands](#telegram-commands)
+7. [Multi-user variables](#multi-user-variables)
+8. [Architecture in 30 seconds](#architecture-in-30-seconds)
+9. [Nanobot / MCP integration (same host)](#nanobot--mcp-integration-same-host)
+10. [Tuning + rate limits](#tuning--rate-limits)
+11. [Security](#security)
+12. [Development](#development)
+13. [Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby)
 
 ---
 
@@ -88,45 +91,102 @@ unattended use systemd / launchd, **or** deploy to Fly.io (next section).
 
 ---
 
-## Quick start (Fly.io)
+## Quick start (Oracle VM — current production)
 
-Cost: **$0/month** within the Fly Hobby plan (one shared-cpu-1x VM, 256 MB,
-1 GB volume, no public ports).
+The daemon currently runs on an **Oracle Cloud Always-Free Tier VM**
+(AMD shape, 2 CPU, 1 GB RAM, 45 GB disk) as a systemd unit, alongside
+[nanobot](#nanobot--mcp-integration-same-host). Cost: **$0/month**.
 
-Detailed walkthrough lives in [`docs/DEPLOY-FLY.md`](docs/DEPLOY-FLY.md).
+Why Oracle and not Fly.io: Cloudflare started blocking the Arbox API
+(`apiappv2.arboxapp.com`) for traffic originating from Fly's Frankfurt
+ASN in April 2026. Oracle's IP reputation passes Cloudflare cleanly.
+The old Fly app is kept stopped as a cold-standby rollback target — see
+[Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby).
+
+Detailed walkthrough: [`docs/DEPLOY-ORACLE.md`](docs/DEPLOY-ORACLE.md).
 The 60-second version:
 
 ```bash
-# 0. flyctl + sign-in (once per machine)
-brew install flyctl
-fly auth signup
+# 1. Create Oracle Always-Free VM (Ubuntu 22.04, AMD micro). One-time.
+#    Open TCP/22 in the VCN security list.
 
-# 1. Launch from this repo (don't deploy yet — secrets first)
-fly launch --no-deploy --copy-config --name <your-app-name> --region fra
+# 2. On the VM as ubuntu:
+mkdir -p ~/arbox/bin ~/arbox/data
+# copy config.yaml to ~/arbox/config.yaml
+# create ~/arbox/data/.env with:
+#   ARBOX_EMAIL=you@example.com
+#   ARBOX_PASSWORD=your-arbox-password
+#   ARBOX_GYM=CrossFit Downtown
+#   TELEGRAM_BOT_TOKEN=123456:ABC...
+#   TELEGRAM_CHAT_ID=123456789
+chmod 600 ~/arbox/data/.env
 
-# 2. Persistent volume for tokens / user_plan / pause / booking_attempts
-fly volumes create arbox_data --region fra --size 1
+# 3. Install the systemd unit (see docs/DEPLOY-ORACLE.md for the full file):
+sudo tee /etc/systemd/system/arbox.service >/dev/null <<'UNIT'
+[Unit]
+Description=arbox-scheduler daemon (auto-book Arbox CrossFit classes)
+After=network.target
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/arbox
+Environment=TZ=Asia/Jerusalem
+Environment=ARBOX_ENV_FILE=/home/ubuntu/arbox/data/.env
+ExecStart=/home/ubuntu/arbox/bin/arbox daemon --interval=1m --lookahead=7
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload && sudo systemctl enable arbox
 
-# 3. Secrets — Arbox login + (optional) Telegram + (optional) gym disambiguation
-fly secrets set \
-  ARBOX_EMAIL='you@example.com' \
-  ARBOX_PASSWORD='your-arbox-password' \
-  ARBOX_GYM='CrossFit Downtown' \
-  TELEGRAM_BOT_TOKEN='123456:ABC...' \
-  TELEGRAM_CHAT_ID='123456789'
+# 4. First deploy — from your Mac:
+bash scripts/deploy-oracle.sh   # cross-compile, scp, systemctl restart, selftest
 
-# 4. Edit fly.toml: set `app = ` to your app name; tweak `primary_region`
-#    if Frankfurt isn't closest to your gym.
-
-# 5. Deploy
-fly deploy
-
-# 6. Verify
-fly logs                       # see [proactive] / [tick] / [booker] lines
-fly ssh console -C '/app/arbox selftest'
+# 5. Automate future deploys (optional) — once the Oracle-Deploy GitHub
+#    Actions workflow lands (see docs/DEPLOY-ORACLE.md status note),
+#    every merge to main auto-deploys. Until then stick with the manual
+#    script above; it's fast enough (~10 s) for day-to-day use.
 ```
 
 After this, control the app entirely from Telegram (see next section).
+
+---
+
+## Updating the code
+
+Day-to-day loop when you change the Go source:
+
+```bash
+# 1. Branch off main (main is what Oracle runs)
+git checkout main && git pull
+git checkout -b feat/<short-name>
+
+# 2. Edit + test locally
+$EDITOR ...
+go test ./...                              # must be green
+go build -o bin/arbox ./cmd/arbox           # optional: catch build errors
+
+# 3. Commit (per-repo GPG is already configured → commits show "Verified")
+git commit -am "feat: <one-line summary>"
+
+# 4. Push + open PR
+git push -u origin HEAD
+gh pr create --fill
+
+# 5. Merge the PR (branch protection requires a PR; 0 reviews needed; squash).
+
+# 6. Deploy to Oracle. Two ways, same sequence:
+#    a) Manual (available now):
+#         bash scripts/deploy-oracle.sh
+#       Builds linux/amd64, scps to Oracle, systemctl restart, selftest.
+#    b) Automated (once the Oracle-Deploy workflow lands):
+#         GitHub Actions cross-compiles, scps, restarts, selftests on every
+#         merge to main. Telegram "🟢 Online" pings when the new rev boots.
+```
+
+Rollback: either `git revert <sha> && git push` (CI redeploys, ~1 min),
+or on your Mac check out a known-good SHA and `bash scripts/deploy-oracle.sh`
+(~10 s). State files on `~/arbox/data/` are never touched by a deploy.
 
 ---
 
@@ -177,8 +237,8 @@ to 1, etc., **inside the burst** (every 1 s for up to 45 s).
 Instead of hand-editing `days:`, run **`/setup`** in Telegram once the
 daemon is up. It pulls the actual class list per weekday and lets you
 toggle slots with inline ✓/○ buttons. **`/setupdone`** writes the result
-to `user_plan.yaml` on the volume; the daemon merges it on every tick — no
-restart needed.
+to `user_plan.yaml` in the data dir; the daemon merges it on every tick —
+no restart needed.
 
 ---
 
@@ -189,9 +249,9 @@ restart needed.
 | Command | What it does |
 |---|---|
 | `/start`, `/help` | One-shot intro |
-| `/status` | Saved selections per weekday + your real Arbox bookings |
-| `/morning [HH-HH] [days\|week]` | Live class list, default 06–12 next 1 day |
-| `/evening [HH-HH] [days\|week]` | Live class list, default 16–22 next 1 day |
+| `/status` | Saved selections per weekday + your real Arbox bookings (shows `WAITLIST N/M` when you're waitlisted) |
+| `/morning [HH-HH] [days\|week]` | Live class list, default 06–12 next 1 day, with waitlist position |
+| `/evening [HH-HH] [days\|week]` | Live class list, default 16–22 next 1 day, with waitlist position |
 | `/setup` | Inline buttons: pick weekly slots from real Arbox classes |
 | `/setupdone` | Save `/setup` selections to `user_plan.yaml` |
 | `/setupcancel` | Discard the in-progress `/setup` session |
@@ -225,10 +285,9 @@ Everything user/gym-specific is one of:
 | `.env` | `ARBOX_EMAIL`, `ARBOX_PASSWORD` | Member login | Fly secrets |
 | `.env` | `ARBOX_TOKEN`, `ARBOX_REFRESH_TOKEN` | Auto-managed | – |
 | `.env` | `ARBOX_BOX_ID`, `ARBOX_LOCATIONS_BOX_ID` | Discovered (re-discovered if `gym:` is set) | – |
-| `.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram control | Fly secrets |
-| `fly.toml` | `app`, `primary_region` | Fly app identity / region | edit and `fly deploy` |
-| `fly.toml` | `[mounts].source` | Volume name | edit + `fly volumes create` |
-| `Dockerfile` | `ENV TZ` | Process timezone | leave default; `ARBOX_TIMEZONE` overrides config |
+| `.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram control | `~/arbox/data/.env` on Oracle |
+| systemd unit | `Environment=TZ=...` | Process timezone | leave default; `ARBOX_TIMEZONE` in `.env` overrides config |
+| systemd unit | `ExecStart=... --interval=1m --lookahead=7` | Daemon tick rate / lookahead | edit `/etc/systemd/system/arbox.service` |
 
 Things that are **constants in code** but easy to flag if you want them as
 config later:
@@ -248,17 +307,21 @@ provider, those are the only constants likely to need rebalancing.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  arbox daemon (one process, one Fly machine)                         │
+│  Oracle Cloud Free VM (ubuntu@152.x.x.x, AMD micro, systemd)         │
 │                                                                      │
-│  ┌─ Telegram bot (long-poll)  ──► /status /morning /setup /pause …   │
-│  ├─ 5-min heartbeat ticker    ──► alive log + safety-net booker      │
-│  └─ Proactive scheduler       ──► sleep until next WindowOpen,       │
-│                                    burst BookClass every 1s for 45s  │
-│                                                                      │
-│  ┌─ /data/.env                 — tokens (auto-renewed on 401)        │
-│  ├─ /data/user_plan.yaml       — overlay from /setup                 │
-│  ├─ /data/pause.json           — /pause state                        │
-│  └─ /data/booking_attempts.json — terminal results, prevents dup     │
+│  ├─ arbox.service    — the daemon (this repo)                        │
+│  │  ┌─ Telegram bot (long-poll) ──► /status /morning /setup /pause   │
+│  │  ├─ 1-min heartbeat ticker   ──► alive log + safety-net booker    │
+│  │  └─ Proactive scheduler      ──► sleep until next WindowOpen,     │
+│  │                                   burst BookClass every 1s × 45s  │
+│  │                                                                   │
+│  │  ┌─ ~/arbox/data/.env               — tokens (auto-renewed on 401)│
+│  │  ├─ ~/arbox/data/user_plan.yaml     — overlay from /setup         │
+│  │  ├─ ~/arbox/data/pause.json         — /pause state                │
+│  │  └─ ~/arbox/data/booking_attempts.json — terminal results, dedup  │
+│  │                                                                   │
+│  └─ nanobot.service  — LLM gateway (MCP host, not in this repo)      │
+│     └── registers arbox as an MCP server (see integration section)   │
 └──────────────────────────────────────────────────────────────────────┘
 
            Arbox member API  apiappv2.arboxapp.com
@@ -266,7 +329,8 @@ provider, those are the only constants likely to need rebalancing.
             standBy/insert, boxes/locations, boxes/<id>/memberships/1)
 ```
 
-No public HTTP port. Outbound only. State is on a 1 GB Fly volume.
+No public HTTP port. Outbound only (except SSH/22 for ops + deploy).
+State lives in `~/arbox/data/` on the VM's 45 GB disk.
 
 ---
 
@@ -303,6 +367,36 @@ can tune without redeploys.
 
 ---
 
+## Nanobot / MCP integration (same host)
+
+The VM also runs **nanobot** (`/usr/local/bin/nanobot gateway`, systemd
+unit `nanobot.service`, working dir `/home/ubuntu/.nanobot/`). Because
+both services run as `ubuntu` on the same host, arbox can expose a
+**loopback-only HTTP API** that nanobot consumes as an MCP server — no
+ports exposed to the public internet, zero network RTT, single trust
+boundary.
+
+Status: **implementation lives in PR [#2 `feat/http-api-mcp`](https://github.com/amanz81/arbox-scheduler/pull/2)** (currently draft,
+paused while the Oracle cutover stabilised). When that lands, the daemon
+gains an optional `--http-addr 127.0.0.1:8787` flag and a small REST
+surface (`GET /status`, `POST /book`, `POST /pause`, etc.) that nanobot
+registers via its MCP config — so asking an LLM "book me into Hall B
+tomorrow 08:00" works end-to-end from any chat the nanobot gateway
+fronts.
+
+Design constraints we've already settled for PR #2:
+
+- Bind to `127.0.0.1` only. Never listen on the public interface.
+- Reuse the existing Telegram-auth allowlist idea: a single `MCP_TOKEN`
+  in `.env`, required as a header. Defence-in-depth on top of loopback.
+- Every write endpoint goes through the same `bookerMu` and
+  `booking_attempts.json` path as the Telegram handlers, so concurrent
+  Telegram + MCP commands can't double-book.
+- The daemon still works without it — `--http-addr ""` (default) keeps
+  the current listenless behaviour for users who don't run nanobot.
+
+---
+
 ## Tuning + rate limits
 
 We don't have a published Arbox rate limit, so the defaults are
@@ -328,8 +422,11 @@ Or stricter — just say so and we can wire a token-bucket on
 
 - `.env` and any token/state files (`pause.json`, `user_plan.yaml`,
   `booking_attempts.json`) are written `0600` by the binary.
-- On Fly, secrets are stored encrypted by Fly itself; `.env` lives only on
-  the persistent volume, not in the image.
+- On Oracle, secrets live in `~/arbox/data/.env` owned by `ubuntu:ubuntu`
+  mode `600`. Nothing sensitive is in the binary or the repo.
+- Deploys use a **dedicated ed25519 key** (`~/.ssh/arbox-deploy-ci`) whose
+  pubkey is the only CI-authorised entry in `authorized_keys`; the
+  private half is only in the `ORACLE_SSH_KEY` GitHub repo secret.
 - The Telegram bot ignores any chat id other than `TELEGRAM_CHAT_ID`.
 - The booking machinery is gated by `bookerMu` so the proactive goroutine
   and the safety-net ticker can never fire `BookClass` for the same
@@ -357,12 +454,38 @@ go build -o bin/arbox ./cmd/arbox
 Repo layout:
 
 ```
-cmd/arbox/             # cobra CLI + Telegram bot + daemon
-internal/arboxapi/     # member API client (login, schedule, book, waitlist)
-internal/config/       # YAML load + validate + env overrides
-internal/schedule/     # window math (24h / Sunday-48h, DST-correct)
-internal/notify/       # Telegram + stdout notifiers
-docs/DEPLOY-FLY.md     # detailed Fly walkthrough
+cmd/arbox/                       # cobra CLI + Telegram bot + daemon
+internal/arboxapi/               # member API client (login, schedule, book, waitlist)
+internal/config/                 # YAML load + validate + env overrides
+internal/schedule/               # window math (24h / Sunday-48h, DST-correct)
+internal/notify/                 # Telegram + stdout notifiers
+scripts/deploy-oracle.sh         # manual deploy Mac → Oracle VM
+.github/workflows/oracle-deploy.yml  # CI: test + auto-deploy on merge to main
+docs/DEPLOY-ORACLE.md            # detailed Oracle walkthrough (production)
+docs/DEPLOY-FLY.md               # legacy Fly walkthrough (cold standby only)
 ```
 
 PRs welcome. Tests must pass and stay deterministic (no fixed-date assumptions).
+
+---
+
+## Fly.io (legacy / cold standby)
+
+The service ran on Fly.io from April 18–20, 2026 before the Cloudflare-vs-Fly
+block forced the Oracle cutover. The app (`arbox-scheduler.fly.dev`, one
+`shared-cpu-1x` machine in `fra`) is kept **stopped, not destroyed**:
+
+- Machine `185947ea234548` — `stopped`
+- Volume `vol_vz8kqqjlyo97n5jv` (1 GB) — preserved with the last `.env`,
+  `user_plan.yaml`, and `booking_attempts.json`
+
+To reactivate it as a rollback (temporary — Cloudflare will still block):
+
+```bash
+homefly machines start 185947ea234548 -a arbox-scheduler
+```
+
+Full historical walkthrough: [`docs/DEPLOY-FLY.md`](docs/DEPLOY-FLY.md).
+If after ~1 month the Oracle setup stays healthy, destroy the Fly app
+with `homefly apps destroy arbox-scheduler` to stop paying attention to
+it (it's still free, but it's noise in your `homefly apps list`).
