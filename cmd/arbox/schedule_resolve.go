@@ -737,22 +737,17 @@ func buildStatusShortReport(ctx context.Context, c *config.Config, client *arbox
 		}
 		fmt.Fprintf(&b, "%s %s — %s\n", datePart, opts[0].Time, summarizePlanOptionsLive(opts, allBy[key], c.CategoryFilter))
 	}
-	hasBooking := false
-	for _, list := range allBy {
-		for _, cl := range list {
-			if cl.YouStatus() != "" {
-				hasBooking = true
-				break
-			}
-		}
-		if hasBooking {
-			break
-		}
-	}
-	if !hasBooking {
-		b.WriteString("\nNo bookings detected on Arbox in this window.\n")
-	}
-	b.WriteString("\nMore: /morning [HH-HH] [days], /weeklyavailable.\n")
+
+	// List the user's actual bookings + waitlists from the same day maps we
+	// already fetched. Reuses the same renderer /schedule resolve uses, so
+	// waitlist position (e.g. "WAITLIST 3/7") shows up here too when Arbox
+	// reports it.
+	b.WriteByte('\n')
+	writeUserBookingsSection(&b, allBy, loc, windowStart, days,
+		"Your Arbox bookings (BOOKED / WAITLIST):",
+		"If you know you have bookings but this stays empty, Arbox may not mark them on this API response for your account.")
+
+	b.WriteString("\nMore: /morning [HH-HH] [days], /evening [HH-HH] [days].\n")
 	return b.String(), nil
 }
 
@@ -972,8 +967,7 @@ func writeUserBookingsSection(b *strings.Builder, allBy map[string][]arboxapi.Cl
 			statusLine := cl.YouStatusDetail()
 			lines = append(lines, line{
 				when: when,
-				text: fmt.Sprintf("· %s %s · %s · %s · schedule_id %d",
-					when.Weekday().String()[:3],
+				text: fmt.Sprintf("· %s · %s · %s · schedule_id %d",
 					when.Format("Mon 02 Jan 15:04"),
 					cl.ResolvedCategoryName(),
 					statusLine,
