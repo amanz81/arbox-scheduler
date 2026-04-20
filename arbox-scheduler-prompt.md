@@ -35,7 +35,7 @@ deploy**. See `README.md` for the user-facing setup.
 | 3 | Scheduler daemon — proactive strike at window-open + 45 s burst | ✅ done |
 | 4 | Fly.io deploy (Dockerfile, fly.toml, persistent volume, GitHub Actions) | ✅ done |
 | 5 | Telegram bot (status, setup wizard, pause/resume, version, selftest) | ✅ done |
-| 6 | LLM/MCP API surface (HTTP REST + bearer for nanobot) | 🔜 designed, not built |
+| 6 | LLM/MCP API surface (HTTP REST + bearer for nanobot) | ✅ done |
 | 7 | Multi-tenant (one process serves several Arbox accounts) | 🔜 not started |
 
 ---
@@ -323,11 +323,10 @@ version. Highlights:
 
 ## Open / planned work
 
-1. **LLM/MCP HTTP API** — design done (see chat history). Endpoints:
-   `/api/v1/{version,status,morning,evening,booked,classes,book,cancel,pause,resume}`,
-   bearer token (`ARBOX_API_BEARER`), dry-run-by-default writes (`?confirm=1`),
-   per-IP rate limit, audit log of mutating calls. Optional MCP shim for
-   nanobot if HTTP isn't ergonomic enough.
+1. **MCP stdio shim (`cmd/arbox-mcp/`)** — only ship if Path A
+   (HTTP MCP via OpenAPI tool discovery, see `docs/NANOBOT.md`) turns
+   out awkward in practice. The HTTP API itself is built and live;
+   see [`docs/API.md`](docs/API.md).
 2. **Boot-time validation** that refuses to start the daemon if the
    account has multiple boxes and `ARBOX_GYM` is unset.
 3. **Cancel-then-rebook** if a higher-priority slot frees up after a
