@@ -279,23 +279,37 @@ The daemon also serves a small REST surface at `/api/v1/` for nanobot /
 Claude / OpenAI tool-calling. It runs in the same process as everything
 else; no extra service to operate.
 
-- Two-tier bearer auth: `ARBOX_API_READ_TOKEN` (GETs only) and
+- **Loopback-only default** (`127.0.0.1:8080`) — both arbox and nanobot
+  run as the same user on the same Oracle VM, so there's no network
+  exposure. Override with `ARBOX_HTTP_ADDR=:8080` only if you need to
+  reach it from outside the host.
+- **Two-tier bearer auth**: `ARBOX_API_READ_TOKEN` (GETs only) and
   `ARBOX_API_ADMIN_TOKEN` (everything).
-- Mutations require `?confirm=1` on the URL on top of the admin token.
-- 60 req/min per token, burst 30. `/data/audit.jsonl` records every
-  mutation.
-- OpenAPI 3.1 spec at `/api/v1/openapi.json`.
-- Disabled (server doesn't start) if both API tokens are unset.
+- **Mutations require `?confirm=1`** on the URL on top of the admin
+  token (belt + suspenders — an LLM has to consciously opt in).
+- **60 req/min per token, burst 30**. Audit log at
+  `~/arbox/data/audit.jsonl` on Oracle records every mutation (override
+  path via `ARBOX_AUDIT_LOG`).
+- **OpenAPI 3.1 spec** at `/api/v1/openapi.json` — nanobot discovers
+  tools from it automatically.
+- **Disabled** (server doesn't start) if both API tokens are unset — so
+  enabling is deliberate.
 
 See:
 
 - [docs/API.md](docs/API.md) — endpoint reference + curl examples.
-- [docs/NANOBOT.md](docs/NANOBOT.md) — exact nanobot config snippet.
+- [docs/NANOBOT.md](docs/NANOBOT.md) — exact nanobot config snippet for
+  the same-VM loopback setup.
+
+### Enable it on Oracle
 
 ```bash
-fly secrets set \
-  ARBOX_API_READ_TOKEN="$(openssl rand -hex 32)" \
-  ARBOX_API_ADMIN_TOKEN="$(openssl rand -hex 32)"
+ssh oracle-vps 'cat >> ~/arbox/data/.env' <<EOF
+ARBOX_API_READ_TOKEN=$(openssl rand -hex 32)
+ARBOX_API_ADMIN_TOKEN=$(openssl rand -hex 32)
+EOF
+ssh oracle-vps 'sudo systemctl restart arbox'
+ssh oracle-vps 'curl -s http://127.0.0.1:8080/api/v1/healthz'   # → {"ok":true, ...}
 ```
 
 ---
@@ -399,29 +413,35 @@ can tune without redeploys.
 
 The VM also runs **nanobot** (`/usr/local/bin/nanobot gateway`, systemd
 unit `nanobot.service`, working dir `/home/ubuntu/.nanobot/`). Because
-both services run as `ubuntu` on the same host, arbox can expose a
+both services run as `ubuntu` on the same host, arbox exposes a
 **loopback-only HTTP API** that nanobot consumes as an MCP server — no
 ports exposed to the public internet, zero network RTT, single trust
 boundary.
 
-Status: **implementation lives in PR [#2 `feat/http-api-mcp`](https://github.com/amanz81/arbox-scheduler/pull/2)** (currently draft,
-paused while the Oracle cutover stabilised). When that lands, the daemon
-gains an optional `--http-addr 127.0.0.1:8787` flag and a small REST
-surface (`GET /status`, `POST /book`, `POST /pause`, etc.) that nanobot
-registers via its MCP config — so asking an LLM "book me into Hall B
-tomorrow 08:00" works end-to-end from any chat the nanobot gateway
-fronts.
+See the detailed endpoint reference in [docs/API.md](docs/API.md) and
+the nanobot wiring walkthrough (with the exact JSON snippet) in
+[docs/NANOBOT.md](docs/NANOBOT.md). The [HTTP API section above](#http-api-llm-agents--nanobot)
+has the one-command enable-it-on-Oracle recipe.
 
-Design constraints we've already settled for PR #2:
+Design properties:
 
-- Bind to `127.0.0.1` only. Never listen on the public interface.
-- Reuse the existing Telegram-auth allowlist idea: a single `MCP_TOKEN`
-  in `.env`, required as a header. Defence-in-depth on top of loopback.
-- Every write endpoint goes through the same `bookerMu` and
-  `booking_attempts.json` path as the Telegram handlers, so concurrent
-  Telegram + MCP commands can't double-book.
-- The daemon still works without it — `--http-addr ""` (default) keeps
-  the current listenless behaviour for users who don't run nanobot.
+- **Loopback by default.** `ARBOX_HTTP_ADDR` defaults to
+  `127.0.0.1:8080`; listens on all interfaces only if you explicitly
+  override.
+- **Bearer auth.** `ARBOX_API_READ_TOKEN` (GETs) and
+  `ARBOX_API_ADMIN_TOKEN` (mutations). Server refuses to start if both
+  are unset — enabling is deliberate.
+- **`?confirm=1` for every mutation.** An LLM must consciously opt in;
+  first call always returns a dry-run preview.
+- **Same `bookerMu` as Telegram + proactive scheduler.** `POST /book`
+  takes the same lock the daemon's booking-window burst uses, so you
+  can't fire `BookClass` for the same `schedule_id` twice. The
+  `booking_attempts.json` file also deduplicates across restarts.
+- **60 req/min per token, burst 30.** `X-RateLimit-*` + `Retry-After`
+  on 429.
+- **Audit log** of every mutation at `~/arbox/data/audit.jsonl`
+  (`client_ip`, token kind, endpoint, confirm flag, response). Readable
+  via `GET /api/v1/audit`.
 
 ---
 

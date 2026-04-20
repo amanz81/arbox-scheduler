@@ -12,27 +12,63 @@ stdio MCP if Path A turns out awkward in practice — not shipped here.)
 
 ---
 
-## 1. Set the API token on the nanobot host
+## Production setup: same Oracle VM
 
-Pick **one** of:
+The daemon and nanobot both run on the same Oracle Free Tier VM, as the
+same `ubuntu` user, under systemd. The HTTP API binds to
+**`127.0.0.1:8080`** by default — loopback only, nothing exposed to the
+internet. nanobot calls it via `http://127.0.0.1:8080`, zero network
+surface.
 
-```bash
-# Read-only — safe for monitoring agents that should never act.
-export ARBOX_API_TOKEN="$ARBOX_API_READ_TOKEN"
-
-# Admin — required if the agent should book / cancel / pause.
-export ARBOX_API_TOKEN="$ARBOX_API_ADMIN_TOKEN"
+```
+┌─ Oracle VM (ubuntu) ──────────────────────────────────────┐
+│  arbox.service    ── daemon + /api/v1 on 127.0.0.1:8080   │
+│  nanobot.service  ── python3.11 -m nanobot gateway        │
+│       │                                                   │
+│       └──── HTTP loopback ────► 127.0.0.1:8080/api/v1     │
+└───────────────────────────────────────────────────────────┘
 ```
 
-Even with the admin token, every mutation still requires `?confirm=1` on
-the URL — the LLM has to deliberately add it before anything hits Arbox.
+No firewall rules, no TLS cert, no public DNS needed.
+
+---
+
+## 1. Enable the API on the daemon side
+
+Set the tokens in `~/arbox/data/.env` on the Oracle VM:
+
+```bash
+ssh oracle-vps 'cat >> ~/arbox/data/.env' <<EOF
+ARBOX_API_READ_TOKEN=$(openssl rand -hex 32)
+ARBOX_API_ADMIN_TOKEN=$(openssl rand -hex 32)
+EOF
+ssh oracle-vps 'sudo systemctl restart arbox'
+ssh oracle-vps 'sudo journalctl -u arbox -n 5 --no-pager'   # expect "[http] listening on 127.0.0.1:8080"
+```
+
+Pick the two tokens carefully: the admin token can book/cancel/pause
+anything; the read token is GET-only. Keep the admin token in a vault
+entry; the read token is safe(r) to paste into nanobot logs.
+
+Until **both** tokens are unset the HTTP server stays dark — the Go
+boot logs `[http] disabled (no API tokens set; set ARBOX_API_READ_TOKEN
+and/or ARBOX_API_ADMIN_TOKEN to enable)`.
+
+Confirm it's up from the VM itself:
+
+```bash
+ssh oracle-vps 'curl -s http://127.0.0.1:8080/api/v1/healthz'
+# → {"ok":true,"version":"94ecb16"}
+```
 
 ---
 
 ## 2. Add to nanobot config
 
-Drop this into your nanobot config (typically `~/.config/nanobot/config.json`
-or your project's `nanobot.json`):
+Edit `/home/ubuntu/.nanobot/config.*` (or the equivalent `nanobot.json`
+your nanobot gateway loads) to register arbox as an MCP server. Use the
+**read** token here unless you're deliberately giving the LLM mutation
+rights:
 
 ```json
 {
@@ -40,19 +76,33 @@ or your project's `nanobot.json`):
     "mcpServers": {
       "arbox": {
         "type": "http",
-        "url":  "https://your-app.fly.dev",
+        "url":  "http://127.0.0.1:8080",
         "headers": {
           "Authorization": "Bearer ${ARBOX_API_TOKEN}"
         },
-        "openapi": "https://your-app.fly.dev/api/v1/openapi.json"
+        "openapi": "http://127.0.0.1:8080/api/v1/openapi.json"
       }
     }
   }
 }
 ```
 
-Replace `https://your-app.fly.dev` with your Fly app URL (or any other
-public host where the daemon is running).
+Set `ARBOX_API_TOKEN` in nanobot's `EnvironmentFile`
+(`/home/ubuntu/.nanobot/secrets.env`) — nanobot's systemd unit already
+loads that file. Example:
+
+```bash
+ssh oracle-vps 'cat >> ~/.nanobot/secrets.env' <<'EOF'
+# Read token for arbox (GET-only). Use the admin token instead if you
+# want the LLM to book / cancel / pause.
+ARBOX_API_TOKEN=<paste ARBOX_API_READ_TOKEN value here>
+EOF
+ssh oracle-vps 'sudo systemctl restart nanobot'
+```
+
+Even with the admin token, every mutation still requires `?confirm=1`
+on the URL — the LLM has to deliberately add it before anything hits
+Arbox.
 
 ---
 
@@ -63,7 +113,7 @@ After restarting nanobot, the LLM should see tools like
 `arbox.post_pause`, etc. (Exact tool names depend on nanobot's OpenAPI
 import naming.)
 
-Quick sanity:
+Quick sanity from the Oracle VM:
 
 ```bash
 nanobot tool list arbox
@@ -76,7 +126,7 @@ plain HTTP from `curl`:
 
 ```bash
 curl -H "Authorization: Bearer $ARBOX_API_TOKEN" \
-  https://your-app.fly.dev/api/v1/version
+  http://127.0.0.1:8080/api/v1/version
 ```
 
 ---
@@ -96,15 +146,24 @@ When wiring this into a Claude / OpenAI agent, include something like:
 
 ## 5. Security checklist
 
-- **Rotate tokens** on a schedule (`fly secrets set ARBOX_API_*_TOKEN=…` +
-  redeploy).
-- **Use the read token whenever possible.** Only give the agent the admin
+- **Loopback-only default.** As long as `ARBOX_HTTP_ADDR` stays
+  unset (or is `127.0.0.1:8080`), the API is not reachable from outside
+  the VM. You can verify with `ss -lntp | grep 8080`.
+- **Rotate tokens** on a schedule: generate new ones, update
+  `~/arbox/data/.env` + `~/.nanobot/secrets.env`, restart both units.
+- **Use the read token whenever possible.** Only hand nanobot the admin
   token if you actually want it to mutate.
-- The two-tier separation means a leaked read token cannot book or cancel.
-- Rate limit (60/min, burst 30) caps blast radius on a leaked token.
-- Bearer over TLS only — Fly enforces HTTPS at the edge (`force_https =
-  true` in `fly.toml`).
-- The audit log records every mutation request with `client_ip`, so you
-  can grep for unexpected origins.
-- (Optional, future) IP allowlist via Fly's edge or a small middleware
-  if you ever expose this beyond the LLM hosts.
+- **Two-tier separation** means a leaked read token cannot book or
+  cancel.
+- **Rate limit** (60/min, burst 30) caps blast radius on a leaked token.
+- **Audit log** records every mutation request with `client_ip`
+  (`127.0.0.1` on the loopback path); anything else would mean
+  `ARBOX_HTTP_ADDR` is set wider than intended.
+- **Mutations require `?confirm=1`** on top of the admin token; dry-run
+  is always the first call.
+- If you ever need to expose this over a real network (e.g. a second
+  Oracle VM running nanobot, or a remote LLM), put it behind a Unix
+  socket (nanobot supports them) or add a TLS-terminating proxy with
+  IP allowlist. Do not just flip to `ARBOX_HTTP_ADDR=:8080` and trust
+  the bearer — the bearer token is fine, but you'd also need to open
+  the VCN security list and that's an easy misconfiguration.

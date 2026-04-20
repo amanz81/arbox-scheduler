@@ -18,12 +18,15 @@ Two bearer tokens, both 32+ random bytes (use `openssl rand -hex 32`):
 | `ARBOX_API_READ_TOKEN`  | Read-only. Required to call any GET endpoint. |
 | `ARBOX_API_ADMIN_TOKEN` | Admin. Required for every mutation. Also accepted on every read endpoint. |
 
-Set them as Fly secrets:
+Set them in the env file the daemon reads. On Oracle that's
+`~/arbox/data/.env`:
 
 ```bash
-fly secrets set \
-  ARBOX_API_READ_TOKEN="$(openssl rand -hex 32)" \
-  ARBOX_API_ADMIN_TOKEN="$(openssl rand -hex 32)"
+ssh oracle-vps 'cat >> ~/arbox/data/.env' <<EOF
+ARBOX_API_READ_TOKEN=$(openssl rand -hex 32)
+ARBOX_API_ADMIN_TOKEN=$(openssl rand -hex 32)
+EOF
+ssh oracle-vps 'sudo systemctl restart arbox'
 ```
 
 Pass on every request:
@@ -64,7 +67,7 @@ On 429 we additionally set `Retry-After: <seconds>`.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET  | `/api/v1/healthz`                | — | Liveness probe (Fly check). |
+| GET  | `/api/v1/healthz`                | — | Unauthenticated liveness probe (safe to poll from systemd / nanobot). |
 | GET  | `/api/v1/openapi.json`           | — | OpenAPI 3.1 spec. |
 | GET  | `/api/v1/version`                | read | Build, gym, tz, pause snapshot. |
 | GET  | `/api/v1/selftest?days=7`        | read | Health checks. |
@@ -90,7 +93,9 @@ On 429 we additionally set `Retry-After: <seconds>`.
 ## Examples
 
 > Throughout, replace `$READ` / `$ADMIN` with your tokens and
-> `$BASE` with `https://your-app.fly.dev`.
+> `$BASE` with the daemon's listen address. On the production Oracle VM
+> that's `http://127.0.0.1:8080` (loopback-only, no TLS needed); locally
+> it's also usually `http://127.0.0.1:8080`.
 
 ### `GET /api/v1/healthz`
 
@@ -348,8 +353,9 @@ Common `code` values: `unauthorized`, `forbidden`, `bad_request`,
 ## Audit log
 
 Every mutation request — dry-run or real — writes one JSON line to
-`/data/audit.jsonl` (override with `ARBOX_AUDIT_LOG`). The file rotates to
-`<path>.1` when it exceeds 10 MB; one backup is kept. Mode `0o600`.
+`audit.jsonl` next to the `.env` file (so `~/arbox/data/audit.jsonl` on
+Oracle). Override with `ARBOX_AUDIT_LOG`. The file rotates to `<path>.1`
+when it exceeds 10 MB; one backup is kept. Mode `0o600`.
 
 Read recent entries via `/api/v1/audit`:
 

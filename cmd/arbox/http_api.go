@@ -10,9 +10,12 @@ package main
 //     server is NOT started — we never want to expose an unauthenticated
 //     surface that lets an agent book/cancel classes. The daemon keeps
 //     doing everything else.
-//   * The server is bound to ARBOX_HTTP_ADDR (default ":8080") so Fly's
-//     [http_service] block can health-check /api/v1/healthz and route
-//     traffic from the Internet through Fly's TLS edge.
+//   * The server binds to ARBOX_HTTP_ADDR (default "127.0.0.1:8080" — the
+//     loopback-only default is deliberate: the production target is the
+//     Oracle Free Tier VM where nanobot runs as the same uid on the same
+//     host, so loopback is the least-exposed path. Set ARBOX_HTTP_ADDR to
+//     ":8080" explicitly if you want to listen on all interfaces, e.g.
+//     for running nanobot in a separate container on the same network).
 //   * On ctx cancellation we run a 5-second graceful Shutdown so in-flight
 //     mutations finish (especially the burst-protected booker calls).
 //
@@ -34,7 +37,11 @@ import (
 )
 
 const (
-	defaultHTTPAddr  = ":8080"
+	// defaultHTTPAddr is loopback-only on purpose. nanobot runs as the same
+	// uid on the same Oracle VM, so loopback is the least-exposed path that
+	// still works. Override with ARBOX_HTTP_ADDR=:8080 for separate-host or
+	// separate-container consumers.
+	defaultHTTPAddr  = "127.0.0.1:8080"
 	httpShutdownWait = 5 * time.Second
 )
 

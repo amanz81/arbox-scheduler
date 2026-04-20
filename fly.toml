@@ -1,10 +1,8 @@
 # fly.toml — Fly.io config for arbox-scheduler
 #
-# This app is primarily an outbound worker that calls the Arbox API on a
-# schedule. The optional [http_service] block exposes the LLM-facing HTTP
-# API (see docs/API.md). The API stays dark unless you set
-# ARBOX_API_READ_TOKEN and/or ARBOX_API_ADMIN_TOKEN as Fly secrets — the
-# Go server checks for those at boot and refuses to listen otherwise.
+# This app is OUTBOUND-ONLY: no public HTTP port, no load balancer. It's a
+# long-running worker that calls the Arbox API on a schedule. Because of
+# that there is no [[services]] / [http_service] block.
 #
 # App name, region, and org are filled in by `fly launch`. Edit `app` and
 # `primary_region` after launch if you want.
@@ -47,23 +45,3 @@ primary_region = "fra"               # frankfurt = lowest-latency free region to
 
 [deploy]
   strategy = "immediate"
-
-# --------------------------------------------------------------------------
-# HTTP service for the LLM-facing API (see docs/API.md and docs/NANOBOT.md).
-# Force-HTTPS at the edge; bearer auth at the app. Only starts if at least
-# one of ARBOX_API_READ_TOKEN / ARBOX_API_ADMIN_TOKEN is set.
-# --------------------------------------------------------------------------
-[http_service]
-  internal_port        = 8080
-  force_https          = true
-  auto_stop_machines   = false
-  auto_start_machines  = true
-  min_machines_running = 1
-  processes            = ["app"]
-
-  [[http_service.checks]]
-    interval     = "30s"
-    timeout      = "5s"
-    grace_period = "10s"
-    method       = "GET"
-    path         = "/api/v1/healthz"
