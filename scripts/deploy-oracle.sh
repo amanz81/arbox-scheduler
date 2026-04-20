@@ -39,24 +39,32 @@ if [ "$want_test" -eq 1 ]; then
   go test ./...
 fi
 
-echo "==> cross-compile linux/amd64"
+echo "==> cross-compile linux/amd64 (arbox + arbox-mcp)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -ldflags "-s -w -X main.Version=$REV" -o "$TMP/arbox" ./cmd/arbox
-ls -la "$TMP/arbox"
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath -ldflags "-s -w -X main.Version=$REV" -o "$TMP/arbox-mcp" ./cmd/arbox-mcp
+ls -la "$TMP/arbox" "$TMP/arbox-mcp"
 
-echo "==> scp to oracle-vps:~/arbox/bin/arbox.new"
-scp -q "$TMP/arbox" oracle-vps:"~/arbox/bin/arbox.new"
+echo "==> scp to oracle-vps:~/arbox/bin/*.new"
+scp -q "$TMP/arbox"     oracle-vps:"~/arbox/bin/arbox.new"
+scp -q "$TMP/arbox-mcp" oracle-vps:"~/arbox/bin/arbox-mcp.new"
 
 echo "==> atomic swap + restart + smoke"
 ssh oracle-vps bash -s <<'REMOTE'
 set -euo pipefail
 cd ~/arbox
+# arbox-mcp first — it's a short-lived subprocess spawned by nanobot on
+# demand, so there's no running instance to conflict with a rename.
+mv bin/arbox-mcp.new bin/arbox-mcp
+chmod +x bin/arbox-mcp
+# Then the long-running daemon binary.
 mv bin/arbox.new bin/arbox
 chmod +x bin/arbox
-echo "  new binary:"
-ls -la bin/arbox
+echo "  new binaries:"
+ls -la bin/arbox bin/arbox-mcp
 ./bin/arbox --help >/dev/null
 sudo systemctl restart arbox
 sleep 3
@@ -66,7 +74,10 @@ echo
 echo "  selftest:"
 set -a; . ./data/.env; set +a
 TZ=Asia/Jerusalem ARBOX_ENV_FILE=~/arbox/data/.env ./bin/arbox selftest --days 3
+echo
+echo "  arbox-mcp version:"
+./bin/arbox-mcp --help 2>/dev/null | head -3 || echo "    (arbox-mcp is an MCP stdio server; no CLI output by design)"
 REMOTE
 
 echo
-echo "✓ deployed rev $REV"
+echo "✓ deployed rev $REV (arbox + arbox-mcp)"
