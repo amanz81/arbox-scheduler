@@ -120,7 +120,8 @@ func buildClassWindowReport(ctx context.Context, c *config.Config, client *arbox
 			case "BOOKED":
 				tag = " — BOOKED"
 			case "WAITLIST":
-				tag = " — WAITLIST"
+				// YouStatusDetail adds "3/7" or "#3" when available.
+				tag = " — " + cl.YouStatusDetail()
 			default:
 				tag = fmt.Sprintf(" — free %d", cl.Free)
 			}

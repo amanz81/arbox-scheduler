@@ -445,7 +445,7 @@ func appendNextUpcomingClass(b *strings.Builder, allBy map[string][]arboxapi.Cla
 			break
 		}
 	}
-	you := chosen.cl.YouStatus()
+	you := chosen.cl.YouStatusDetail()
 	if you == "" {
 		you = "-"
 	}
@@ -564,7 +564,7 @@ func resolvePlanOptionAvailability(opt config.ClassOption, classes []arboxapi.Cl
 		if !ok {
 			continue
 		}
-		you := c.YouStatus()
+		you := c.YouStatusDetail()
 		if you == "" {
 			you = "-"
 		}
@@ -967,13 +967,16 @@ func writeUserBookingsSection(b *strings.Builder, allBy map[string][]arboxapi.Cl
 			if err != nil {
 				continue
 			}
+			// Surface waitlist position when Arbox provides it
+			// (e.g. "WAITLIST 3/7"); harmless for BOOKED rows.
+			statusLine := cl.YouStatusDetail()
 			lines = append(lines, line{
 				when: when,
 				text: fmt.Sprintf("· %s %s · %s · %s · schedule_id %d",
 					when.Weekday().String()[:3],
 					when.Format("Mon 02 Jan 15:04"),
 					cl.ResolvedCategoryName(),
-					st,
+					statusLine,
 					cl.ID),
 			})
 		}

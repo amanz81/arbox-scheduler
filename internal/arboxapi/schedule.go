@@ -37,6 +37,11 @@ type Class struct {
 	UserBookedID *int `json:"user_booked"`
 	// UserStandByID is non-nil when the user is on this class's waitlist.
 	UserStandByID *int `json:"user_in_standby"`
+	// StandByPosition is the user's 1-based ordinal on the waitlist (1 = next
+	// in line). Arbox populates this only when `user_in_standby` is set. Zero
+	// means "not on waitlist" OR "API didn't return this field for this
+	// account" — treat 0 as "unknown".
+	StandByPosition int `json:"stand_by_position"`
 
 	// DisableCancellationMinutes is how many minutes before class start you
 	// can no longer cancel (0 if always cancellable).
@@ -107,6 +112,36 @@ func (c Class) YouStatus() string {
 		}
 	}
 	return ""
+}
+
+// YouStatusDetail returns YouStatus plus a human-readable position suffix
+// like "WAITLIST 3/7" when the user is on the waitlist AND we know the
+// ordinal + total. Falls back to plain "WAITLIST" when the position is
+// unknown, or "BOOKED" / "" as YouStatus would return.
+func (c Class) YouStatusDetail() string {
+	base := c.YouStatus()
+	if base != "WAITLIST" {
+		return base
+	}
+	pos := c.StandByPosition
+	if pos == 0 && c.Raw != nil {
+		// Some Arbox responses keep it only in Raw.
+		if v, ok := c.Raw["stand_by_position"]; ok {
+			switch x := v.(type) {
+			case float64:
+				pos = int(x)
+			case int:
+				pos = x
+			}
+		}
+	}
+	if pos > 0 && c.StandBy > 0 {
+		return fmt.Sprintf("%s %d/%d", base, pos, c.StandBy)
+	}
+	if pos > 0 {
+		return fmt.Sprintf("%s #%d", base, pos)
+	}
+	return base
 }
 
 func bookingFromRaw(raw map[string]any) bool {
