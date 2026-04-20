@@ -21,9 +21,13 @@ func main() {
 	_ = envfile.Load(defaultEnvPath())
 
 	root := &cobra.Command{
-		Use:   "arbox",
-		Short: "Auto-book Arbox CrossFit classes",
+		Use:     "arbox",
+		Short:   "Auto-book Arbox CrossFit classes",
+		Version: Version,
 	}
+	// Put rev + go + os/arch on one line so `arbox --version` output is
+	// enough to answer "is Oracle running what I just pushed?" without SSH.
+	root.SetVersionTemplate(versionTemplate())
 	root.PersistentFlags().StringVar(&cfgPath, "config", "config.yaml", "path to config YAML")
 
 	scheduleCmd := &cobra.Command{
