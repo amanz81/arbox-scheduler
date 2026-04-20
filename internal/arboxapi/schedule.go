@@ -393,6 +393,35 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 	return resp, respBody, nil
 }
 
+// Raw is the escape-hatch request primitive for the LLM passthrough
+// (GET/POST /api/v1/arbox/query). It runs the same auto-relogin-on-401
+// and Cloudflare-passing-headers plumbing doJSON has, but returns the
+// raw upstream status + body without any JSON decoding — so an LLM can
+// hit Arbox routes we don't yet wrap in typed helpers (e.g.
+// /api/v2/user/feed, /api/v2/boxes/<id>/memberships/1,
+// /api/v2/notifications/...).
+//
+// path MUST start with "/" and is appended to BaseURL. body may be nil
+// for GET or any JSON-serializable value for POST/PUT. Non-2xx responses
+// are returned normally (status + body); they are not treated as errors
+// — the caller (a security-conscious handler) decides what to surface.
+func (c *Client) Raw(ctx context.Context, method, path string, body any) (status int, respBody []byte, err error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, b, derr := c.do(ctx, method, path, body)
+		if derr != nil {
+			return 0, nil, derr
+		}
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 && c.CanAutoRelogin() {
+			if _, lerr := c.LoginAndStore(ctx, c.creds.Email, c.creds.Password); lerr != nil {
+				return resp.StatusCode, b, nil
+			}
+			continue
+		}
+		return resp.StatusCode, b, nil
+	}
+	return 0, nil, errors.New("arbox: exhausted retries")
+}
+
 // int helper for JSON numbers that sometimes arrive as strings.
 func atoiAny(v any) int {
 	switch x := v.(type) {

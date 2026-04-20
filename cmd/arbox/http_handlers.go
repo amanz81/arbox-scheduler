@@ -50,7 +50,17 @@ type classResp struct {
 	MaxUsers   int    `json:"max_users"`
 	StandBy    int    `json:"stand_by"`
 	YouStatus  string `json:"you_status"`
-	Coach      string `json:"coach,omitempty"`
+	// StandByPosition is the caller's 1-based ordinal on this class's waitlist
+	// (1 = next in line). 0 when the user isn't on the waitlist OR when Arbox
+	// didn't surface the field for this payload — treat 0 as "unknown" on the
+	// consumer side. Kept alongside YouStatus + StandBy so an LLM can answer
+	// "what is my position" without a second round-trip.
+	StandByPosition int `json:"stand_by_position,omitempty"`
+	// YouStatusDetail is the human-readable version of YouStatus that includes
+	// the position when known — e.g. "WAITLIST 3/9" or "BOOKED". Empty when
+	// the user has no relationship with the class.
+	YouStatusDetail string `json:"you_status_detail,omitempty"`
+	Coach           string `json:"coach,omitempty"`
 }
 
 func toClassResp(c arboxapi.Class) classResp {
@@ -59,17 +69,19 @@ func toClassResp(c arboxapi.Class) classResp {
 		coach = strings.TrimSpace(c.Coach.FullName)
 	}
 	return classResp{
-		ScheduleID: c.ID,
-		Date:       c.Date,
-		Time:       hhmm(c.Time),
-		EndTime:    hhmm(c.EndTime),
-		Category:   c.ResolvedCategoryName(),
-		Free:       c.Free,
-		Registered: c.Registered,
-		MaxUsers:   c.MaxUsers,
-		StandBy:    c.StandBy,
-		YouStatus:  c.YouStatus(),
-		Coach:      coach,
+		ScheduleID:      c.ID,
+		Date:            c.Date,
+		Time:            hhmm(c.Time),
+		EndTime:         hhmm(c.EndTime),
+		Category:        c.ResolvedCategoryName(),
+		Free:            c.Free,
+		Registered:      c.Registered,
+		MaxUsers:        c.MaxUsers,
+		StandBy:         c.StandBy,
+		StandByPosition: c.StandByPosition,
+		YouStatus:       c.YouStatus(),
+		YouStatusDetail: c.YouStatusDetail(),
+		Coach:           coach,
 	}
 }
 
@@ -381,11 +393,22 @@ func (s *apiServer) handleWindow(w http.ResponseWriter, r *http.Request, defFrom
 
 // ----- /bookings ---------------------------------------------------------
 
+// bookingResp is one confirmed (BOOKED) or waitlisted (WAITLIST) entry in
+// the caller's upcoming Arbox schedule. Fields beyond the minimal
+// (schedule_id, when, category, status) exist so an LLM can answer
+// follow-up questions — "what is my position", "how many free spots are
+// there", "how full is the waitlist" — from a single bookings call.
 type bookingResp struct {
-	ScheduleID int       `json:"schedule_id"`
-	When       time.Time `json:"when"`
-	Category   string    `json:"category"`
-	Status     string    `json:"status"`
+	ScheduleID      int       `json:"schedule_id"`
+	When            time.Time `json:"when"`
+	Category        string    `json:"category"`
+	Status          string    `json:"status"`         // "BOOKED" | "WAITLIST"
+	StatusDetail    string    `json:"status_detail"`  // e.g. "WAITLIST 3/9"
+	StandByPosition int       `json:"stand_by_position,omitempty"`
+	StandByTotal    int       `json:"stand_by_total,omitempty"`
+	Free            int       `json:"free"`
+	Registered      int       `json:"registered"`
+	MaxUsers        int       `json:"max_users"`
 }
 
 func (s *apiServer) handleBookings(w http.ResponseWriter, r *http.Request) {
@@ -419,8 +442,16 @@ func (s *apiServer) handleBookings(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			out = append(out, bookingResp{
-				ScheduleID: c.ID, When: when,
-				Category: c.ResolvedCategoryName(), Status: st,
+				ScheduleID:      c.ID,
+				When:            when,
+				Category:        c.ResolvedCategoryName(),
+				Status:          st,
+				StatusDetail:    c.YouStatusDetail(),
+				StandByPosition: c.StandByPosition,
+				StandByTotal:    c.StandBy,
+				Free:            c.Free,
+				Registered:      c.Registered,
+				MaxUsers:        c.MaxUsers,
 			})
 		}
 	}

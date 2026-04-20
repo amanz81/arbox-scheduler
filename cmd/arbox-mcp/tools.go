@@ -202,6 +202,44 @@ var toolDefs = []toolDef{
 			"additionalProperties": false,
 		},
 	},
+
+	// ---- Escape hatch: passthrough to upstream Arbox member API. ----
+
+	{
+		name:   "arbox_api_query",
+		method: "POST",
+		path:   "/api/v1/arbox/query",
+		desc: "Call any Arbox member API endpoint (https://apiappv2.arboxapp.com/api/v2/...) " +
+			"through the daemon, reusing the authenticated session + Cloudflare-passing " +
+			"headers. Use this when the specific arbox_* tools above don't cover what " +
+			"the user asked for — e.g. reading the user feed, listing memberships, pulling " +
+			"notifications, checking box metadata. " +
+			"Path must start with /api/v2/. Auth endpoints (login/logout/refresh/password) " +
+			"are blocked. The response includes { status, json | body_base64, body_is_json } " +
+			"so you can inspect non-2xx upstream errors yourself. Requires the admin token.",
+		schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"method": map[string]any{
+					"type":        "string",
+					"enum":        []string{"GET", "POST", "PUT", "PATCH", "DELETE"},
+					"default":     "GET",
+					"description": "HTTP method to use against the upstream Arbox API.",
+				},
+				"path": map[string]any{
+					"type":        "string",
+					"pattern":     `^/api/v2/[A-Za-z0-9/_\-.?&=%]+$`,
+					"description": "Upstream path including leading slash, e.g. '/api/v2/user/feed' or '/api/v2/boxes/1130/memberships/1'.",
+				},
+				"body": map[string]any{
+					"type":        "object",
+					"description": "JSON body for POST/PUT/PATCH. Omit for GET. Forwarded verbatim.",
+				},
+			},
+			"required":             []string{"path"},
+			"additionalProperties": false,
+		},
+	},
 }
 
 // toolIndex is the O(1) lookup used by tools/call.

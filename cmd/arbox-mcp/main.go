@@ -224,12 +224,20 @@ func (s *server) call(method, path string, args map[string]any) ([]byte, int, er
 		}
 		u.RawQuery = q.Encode()
 	} else {
+		// POST path. Default shape: every arg except `confirm` goes into
+		// the JSON body; `confirm: true` moves to ?confirm=1 so the REST
+		// layer's dry-run gate still applies.
+		//
+		// arbox_api_query is different: its entire `body` arg IS the
+		// upstream body the user wants us to forward, so we pass the
+		// envelope through as-is (letting the REST handler handle
+		// validation + upstream dispatch). That's why we detect the
+		// "passthrough" shape (a single `body` key + possibly method/path)
+		// and flatten it rather than nesting body under `body`.
 		jsonBody := map[string]any{}
 		q := u.Query()
 		for k, v := range args {
 			if k == "confirm" {
-				// Preserve dry-run-by-default: only set ?confirm=1 when
-				// the caller explicitly passes confirm: true.
 				if b, ok := v.(bool); ok && b {
 					q.Set("confirm", "1")
 				}

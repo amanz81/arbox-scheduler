@@ -158,6 +158,14 @@ func (s *apiServer) routes() http.Handler {
 	mux.Handle("POST /api/v1/plan/day", admin(s.handlePlanDay))
 	mux.Handle("POST /api/v1/plan/clear", admin(s.handlePlanClear))
 
+	// Generic passthrough to the upstream Arbox member API for anything
+	// we don't yet wrap in a typed endpoint. Admin-token-only because the
+	// body is opaque JSON — we can't enforce the ?confirm=1 dry-run gate
+	// on arbitrary routes, so gate it at the bearer layer instead.
+	// Read-like methods (GET/HEAD) still allowed; see handler for the
+	// method + path safelist.
+	mux.Handle("POST /api/v1/arbox/query", admin(s.handleArboxQuery))
+
 	return recoverMiddleware(mux)
 }
 
