@@ -20,7 +20,7 @@ info:
 
 servers:
   - url: https://arbox-scheduler.fly.dev
-    description: Production (Fly.io)
+    description: Production (Oracle VM)
   - url: http://localhost:8080
     description: Local dev
 

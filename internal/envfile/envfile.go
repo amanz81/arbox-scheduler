@@ -18,7 +18,7 @@ import (
 // Path returns the effective .env path for the current process.
 //
 // Priority:
-//  1. Explicit ARBOX_ENV_FILE env var (useful on Fly.io / systemd where we
+//  1. Explicit ARBOX_ENV_FILE env var (useful on systemd / containers where we
 //     want the file on a persistent volume like /data/.env).
 //  2. The fallback provided by the caller (typically ".env" in cwd).
 //

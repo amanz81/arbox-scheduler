@@ -121,7 +121,7 @@ func runHTTPAPI(
 }
 
 // routes builds the mux. Every handler is wrapped with recover + auth +
-// rate limit. /healthz and /openapi.json are unauthenticated (Fly checks +
+// rate limit. /healthz and /openapi.json are unauthenticated (health checks +
 // nanobot tool discovery).
 func (s *apiServer) routes() http.Handler {
 	mux := http.NewServeMux()

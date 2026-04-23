@@ -21,7 +21,8 @@ import (
 // Version is overridden at build time via `-ldflags "-X main.Version=vX.Y"`.
 var Version = "dev"
 
-// newDaemonCmd is the long-running process we'll ship to Fly.io.
+// newDaemonCmd is the long-running process we ship to the production host
+// (Oracle Free Tier VM today; anything Linux or a container works).
 //
 // For now it's a HEARTBEAT + RESOLVE daemon: every `--interval`, fetch the
 // next N days of options and log what's coming, including the countdown to
@@ -37,7 +38,7 @@ func newDaemonCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Long-running supervisor (Fly.io / systemd entrypoint)",
+		Short: "Long-running supervisor (systemd / launchd / container entrypoint)",
 		Long: `Runs the Arbox scheduler as a long-running process.
 
 Current behavior (heartbeat-only, no real bookings yet):
@@ -50,7 +51,7 @@ Current behavior (heartbeat-only, no real bookings yet):
       · one *shutdown* message on SIGTERM
       · long-poll command handler: /start, /help, /status, /weeklyavailable, /setup, /setupdone, /setupcancel (setMyCommands)
 
-Designed as the container CMD on Fly.io.`,
+Designed to be a container CMD or a systemd ExecStart.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadValidated()
 			if err != nil {

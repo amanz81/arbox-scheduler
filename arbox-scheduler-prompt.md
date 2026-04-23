@@ -1,7 +1,23 @@
 # Arbox Auto-Scheduler — Project Prompt
 
-This document captures the **current state and intent** of the project so a
-new Claude Code session (or a new contributor) can pick up where we left off
+> **📌 Historical design doc, not the source of truth.**
+> This file captured the project's intent mid-2026 when Fly.io was still the
+> deploy target. Fly was retired after Cloudflare started 403'ing its ASN
+> from the Arbox API. For **current** state and operations see:
+>
+> - [`README.md`](README.md) — user-facing overview + quick start
+> - [`docs/FORK-SETUP.md`](docs/FORK-SETUP.md) — "I want to run this" walkthrough
+> - [`docs/DEPLOY-ORACLE.md`](docs/DEPLOY-ORACLE.md) — production Oracle VM runbook
+> - [`.cursor/skills/arbox-scheduler/SKILL.md`](.cursor/skills/arbox-scheduler/SKILL.md) — the skill an LLM should load when editing this repo
+>
+> Content below references `/data/`, `fly.toml`, `fly secrets`, etc. — none
+> of those are accurate for the current layout. Preserved for commit
+> archaeology only.
+
+---
+
+This document captured the **state and intent** of the project so a
+new Claude Code session (or a new contributor) could pick up where we left off
 without re-discovering decisions. The original day-1 prompt is preserved at
 the bottom under [Phase-1 prompt (historical)](#phase-1-prompt-historical).
 

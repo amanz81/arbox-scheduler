@@ -25,7 +25,7 @@ default_time: "09:00"
 #   gym: "CrossFit Downtown"
 #   gym: "Tel Aviv"
 #
-# Can also be supplied via the ARBOX_GYM env var (Fly secret) so the repo
+# Can also be supplied via the ARBOX_GYM env var so the repo
 # stays user-agnostic.
 gym: ""
 

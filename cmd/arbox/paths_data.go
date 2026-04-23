@@ -6,7 +6,8 @@ import (
 )
 
 // dataDir is the directory that holds persistent runtime files (.env,
-// user_plan.yaml, setup_session.json). On Fly this is /data; locally it is
+// user_plan.yaml, setup_session.json). On the production Oracle VM this is
+// ~/arbox/data/; locally it is
 // the directory containing .env (often the repo root).
 func dataDir() string {
 	p := os.Getenv("ARBOX_ENV_FILE")

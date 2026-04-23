@@ -1,22 +1,18 @@
 # Deploying arbox-scheduler to Oracle Free Tier
 
-Replaces [`docs/DEPLOY-FLY.md`](DEPLOY-FLY.md) as the primary target.
+The author's production target. $0/month, reliable Cloudflare passage,
+and a generous always-free tier (AMD micro + 4× Ampere A1). See the main
+[README](../README.md#quick-start-oracle-vm--current-production) for a
+side-by-side comparison with other cheap hosts (Netcup, Hetzner).
 
-> **Current rollout status (April 2026):**
-> The manual deploy path (`scripts/deploy-oracle.sh`) is live and proven —
-> it deployed the latest rev from your Mac through the `oracle-vps` SSH
-> alias in ~10 s end-to-end. The GitHub Actions workflow described below
-> (`.github/workflows/oracle-deploy.yml`) is **prepared and reviewed but
-> not yet committed**; it will be added in a tiny follow-up PR (one file).
-> Until that lands, use the manual script. Once it's in, pushing to
-> `main` will auto-deploy.
+## Why Oracle specifically
 
-## Why Oracle, not Fly
-
-Cloudflare began blocking `apiappv2.arboxapp.com` from Fly's Frankfurt ASN
-in April 2026 (HTTP 403 + challenge HTML on every call). Oracle's IP
-reputation passes Cloudflare's default "Bot Fight Mode" cleanly. The Oracle
-VM we already used for nanobot has plenty of headroom for arbox-scheduler.
+Arbox's API is behind Cloudflare with Bot Fight Mode on. Cloudflare
+scores inbound connections by ASN; some hosting-heavy ASNs (Fly.io,
+parts of Hetzner) get challenged or 403'd out of the box. Oracle Cloud
+Frankfurt has passed cleanly in every test we've run. If you're picking
+a different host, verify the daemon can reach `apiappv2.arboxapp.com`
+with a simple `curl -sI` against the login endpoint before you commit.
 
 ## Topology
 
@@ -148,10 +144,3 @@ actually performs. If you want to tighten further later:
 - Limit the Security List ingress to GitHub's published Actions CIDRs
   (`https://api.github.com/meta` → `.actions`). The list is wide (~4000
   CIDRs) and churns weekly, so most people rely on key security instead.
-
-## What about Fly?
-
-The old Fly app (`arbox-scheduler.fly.dev`) is stopped (not destroyed) as a
-cold rollback target. See the `homefly` wrapper in `~/.zshrc` on your Mac
-if you need to reach it. If you never use it again after ~1 month, destroy
-with `homefly apps destroy arbox-scheduler`.

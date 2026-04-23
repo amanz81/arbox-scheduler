@@ -6,7 +6,7 @@
 # Stage 2: ship it on Alpine so we get a real shell + tzdata + ca-certs for
 # debugging via `fly ssh console`, while staying under ~20 MB total.
 #
-# Runtime layout on Fly.io:
+# Runtime layout for any container host (/data is a common volume convention):
 #   /app/arbox        — the binary
 #   /app/config.yaml  — baked-in config (override by mounting a file)
 #   /data/.env        — persisted tokens (ARBOX_ENV_FILE points here)
@@ -23,7 +23,7 @@ RUN go mod download
 
 COPY . .
 
-# Cross-compile for the target arch so this image works whether Fly gives us
+# Cross-compile for the target arch so this image works whether the host gives us
 # amd64 or arm64 machines. CGO is off so the binary is fully static.
 ARG TARGETOS
 ARG TARGETARCH
