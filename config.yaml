@@ -1,15 +1,19 @@
 # Arbox auto-scheduler config.
 # Times are 24h "HH:MM" in the configured timezone.
 #
-# Each day can be written two ways:
-#   1. Shorthand (single option):
-#        monday: { enabled: true, time: "08:30", category: "Hall B" }
-#   2. Priority list (ordered; first is most preferred):
-#        monday:
-#          enabled: true
-#          options:
-#            - { time: "08:30", category: "Hall B" }
-#            - { time: "08:30", category: "Hall A" }
+# One class per day — the daemon books exactly one class per weekday, no
+# priority-list fallback. Use either shorthand:
+#   monday: { enabled: true, time: "08:30", category: "Hall B" }
+# …or the full form (same thing, one option):
+#   monday:
+#     enabled: true
+#     options:
+#       - { time: "08:30", category: "Hall B" }
+#
+# Legacy multi-option YAML still parses for backwards compatibility, but
+# Validate() clamps to options[0] and prints a stderr warning naming the
+# dropped entries. If you want "just this Sunday book Hall A instead,"
+# use the one-time-override file (Telegram /setup → 📅 Just {date}).
 #
 # `category` is a case-insensitive substring match against Arbox's
 # box_categories.name (e.g. "Crossfit Hall B", "CrossFit- Hall A").
@@ -25,8 +29,8 @@ default_time: "09:00"
 #   gym: "CrossFit Downtown"
 #   gym: "Tel Aviv"
 #
-# Can also be supplied via the ARBOX_GYM env var so the repo
-# stays user-agnostic.
+# Can also be supplied via the ARBOX_GYM env var so the repo stays
+# user-agnostic.
 gym: ""
 
 # Global filter: only classes whose category contains one of `include` AND
@@ -50,27 +54,23 @@ category_filter:
     - "Mobility"
 
 days:
-  # Sunday: 48h booking window (opens Friday same time). Prefer Hall B, fall
-  # back to Hall A if the B slot doesn't exist or fills up.
+  # Sunday: 48h booking window (opens Friday same time).
   sunday:
     enabled: true
-    options:
-      - { time: "08:00", category: "Hall B" }
-      - { time: "08:00", category: "Hall A" }
+    time: "08:00"
+    category: "Hall B"
 
-  # Monday: rare 08:30 slot. Same hall priority.
+  # Monday: 08:30 slot.
   monday:
     enabled: true
-    options:
-      - { time: "08:30", category: "Hall B" }
-      - { time: "08:30", category: "Hall A" }
+    time: "08:30"
+    category: "Hall B"
 
-  # Tuesday: 09:00 is the weightlifting slot (Hall B); Hall A WOD same time if you prefer.
+  # Tuesday: 09:00 weightlifting in Hall B.
   tuesday:
     enabled: true
-    options:
-      - { time: "09:00", category: "Weightlifting" }
-      - { time: "09:00", category: "Hall A" }
+    time: "09:00"
+    category: "Weightlifting"
 
   wednesday:
     enabled: false  # rest day
@@ -78,17 +78,14 @@ days:
   # Thursday: same 08:30 as Monday.
   thursday:
     enabled: true
-    options:
-      - { time: "08:30", category: "Hall B" }
-      - { time: "08:30", category: "Hall A" }
+    time: "08:30"
+    category: "Hall B"
 
-  # Friday: your preferred slot (11:00). Hall B also exists at 09:00 some
-  # weeks at the gym; that is not what this row targets.
+  # Friday: preferred slot (11:00).
   friday:
     enabled: true
-    options:
-      - { time: "11:00", category: "Hall B" }
-      - { time: "11:00", category: "Hall A" }
+    time: "11:00"
+    category: "Hall B"
 
   saturday:
     enabled: false  # rest day

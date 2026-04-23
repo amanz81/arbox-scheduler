@@ -147,17 +147,22 @@ days:
   wednesday:
     enabled: false                  # rest day
 
-  # Priority example: prefer Studio 1 at 09:00, fall back to Studio 2.
   thursday:
     enabled: true
-    options:
-      - { time: "09:00", category: "Studio 1" }
-      - { time: "09:00", category: "Studio 2" }
+    time: "09:00"
+    category: "Studio 1"
 
   friday: { enabled: false }
   saturday: { enabled: true, time: "08:00", category: "Open Gym" }
   sunday: { enabled: false }
 ```
+
+**One class per weekday.** The daemon books exactly one class per day;
+there is no priority-list fallback. If `Studio 1` at 09:00 doesn't exist
+or is full, it tries `Studio 1`'s waitlist and stops — it will NOT also
+attempt `Studio 2`. For "just this Thursday book Studio 2 instead," use
+the Telegram `/setup → 📅 Just Thu 30 Apr` button (section 8) which
+writes a one-time override without touching the recurring plan.
 
 **Don't worry about getting the plan perfect up front.** You can always
 update it later (see "Telegram setup wizard" below).

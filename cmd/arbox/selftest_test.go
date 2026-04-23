@@ -8,12 +8,14 @@ import (
 	"github.com/amanz81/arbox-scheduler/internal/config"
 )
 
-func TestNextPlannedBookingsSummary_groupsByStartAndOrder(t *testing.T) {
+func TestNextPlannedBookingsSummary_oneLinePerDay(t *testing.T) {
 	loc, _ := time.LoadLocation("Asia/Jerusalem")
 	cfg := &config.Config{
 		Timezone:    "Asia/Jerusalem",
 		DefaultTime: "08:30",
 		Days: map[string]config.DayConfig{
+			// Priority-list input is legacy and now clamped: Hall B wins,
+			// Hall A dropped. The summary line reflects only Hall B.
 			"sunday": {Enabled: true, Options: []config.ClassOption{
 				{Time: "08:00", Category: "Hall B"},
 				{Time: "08:00", Category: "Hall A"},
@@ -36,10 +38,14 @@ func TestNextPlannedBookingsSummary_groupsByStartAndOrder(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("expected at least one upcoming line")
 	}
-	// At least one Sunday line should collapse Hall B + Hall A into one entry.
 	joined := strings.Join(got, "\n")
-	if !strings.Contains(joined, "Hall B then Hall A") {
-		t.Fatalf("priority list collapse missing among:\n%s", joined)
+	// Sundays must render as Hall B alone — the legacy "Hall B then Hall A"
+	// collapse is gone because priority fallback is gone.
+	if strings.Contains(joined, "Hall B then Hall A") {
+		t.Fatalf("legacy priority concatenation should be gone:\n%s", joined)
+	}
+	if !strings.Contains(joined, "Hall B") {
+		t.Fatalf("Sunday Hall B line missing:\n%s", joined)
 	}
 	for _, l := range got {
 		if !strings.Contains(l, "window") {
