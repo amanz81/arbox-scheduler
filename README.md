@@ -40,7 +40,6 @@ Tier VM**, ~7 MB RSS) and is controlled end-to-end from **Telegram**.
 11. [Tuning + rate limits](#tuning--rate-limits)
 12. [Security](#security)
 13. [Development](#development)
-14. [Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby)
 
 ---
 
@@ -120,11 +119,13 @@ The daemon currently runs on an **Oracle Cloud Always-Free Tier VM**
 (AMD shape, 2 CPU, 1 GB RAM, 45 GB disk) as a systemd unit, alongside
 [nanobot](#nanobot--mcp-integration-same-host). Cost: **$0/month**.
 
-Why Oracle and not Fly.io: Cloudflare started blocking the Arbox API
-(`apiappv2.arboxapp.com`) for traffic originating from Fly's Frankfurt
-ASN in April 2026. Oracle's IP reputation passes Cloudflare cleanly.
-The old Fly app is kept stopped as a cold-standby rollback target — see
-[Fly.io (legacy / cold standby)](#flyio-legacy--cold-standby).
+Why Oracle: Arbox's API is fronted by Cloudflare with Bot Fight Mode on,
+and Cloudflare scores IP reputation by ASN. Oracle Cloud Frankfurt passes
+cleanly; some hosting-heavy ASNs (Fly, parts of Hetzner) get challenged.
+Oracle also has a true always-free tier (AMD micro + 4x Ampere A1), so
+total cost stays $0/month. Alternatives that also pass Cloudflare and
+cost little: Netcup (~€3/mo), Hetzner CAX11 (~€4/mo), or any home
+server on a residential IP.
 
 Detailed walkthrough: [`docs/DEPLOY-ORACLE.md`](docs/DEPLOY-ORACLE.md).
 The 60-second version:
@@ -218,7 +219,7 @@ or on your Mac check out a known-good SHA and `bash scripts/deploy-oracle.sh`
 Two files matter:
 
 - **`config.yaml`** — checked into the repo. Edit it once when you set up.
-- **`.env`** — secrets. Gitignored. On Fly it lives at `/data/.env` (auto-created on first login).
+- **`.env`** — secrets. Gitignored. On Oracle it lives at `~/arbox/data/.env` (path controlled by `ARBOX_ENV_FILE`; auto-created on first login).
 
 ### `config.yaml` — minimum viable
 
@@ -227,7 +228,7 @@ timezone: Asia/Jerusalem      # or your gym's TZ
 default_time: "09:00"
 
 # REQUIRED if your Arbox account belongs to >1 gym; substring of the box or
-# location name. Can also be set via ARBOX_GYM env (Fly secret).
+# location name. Can also be set via ARBOX_GYM env var.
 gym: ""
 
 # Only classes whose category contains an `include` AND no `exclude`
@@ -288,7 +289,7 @@ Notifications you'll receive automatically:
 - `🟢 *Online*` — daemon boot
 - `🫀 *Heartbeat*` — once per local calendar day with self-test + upcoming bookings
 - `✅ *Booked*` / `⏳ *Waitlisted*` / `❌ *Booking failed*` — every booking attempt
-- `🔴 *Shutting down*` — on SIGTERM (e.g. Fly redeploy)
+- `🔴 *Shutting down*` — on SIGTERM (systemd restart, container stop, etc.)
 - `⚠️ *Daemon error*` — for tick or booker errors
 
 Only the chat id matching `TELEGRAM_CHAT_ID` is allowed to send commands.
@@ -365,7 +366,7 @@ Everything user/gym-specific is one of:
 | `config.yaml` | `gym` | Pick the right gym when account has many | `ARBOX_GYM` env |
 | `config.yaml` | `category_filter.include` / `exclude` | Substring filter (Hebrew/English/etc.) | edit YAML |
 | `config.yaml` | `days` / `default_time` | Weekly plan | edit YAML or use `/setup` → `user_plan.yaml` |
-| `.env` | `ARBOX_EMAIL`, `ARBOX_PASSWORD` | Member login | Fly secrets |
+| `.env` | `ARBOX_EMAIL`, `ARBOX_PASSWORD` | Member login | env vars / host secrets |
 | `.env` | `ARBOX_TOKEN`, `ARBOX_REFRESH_TOKEN` | Auto-managed | – |
 | `.env` | `ARBOX_BOX_ID`, `ARBOX_LOCATIONS_BOX_ID` | Discovered (re-discovered if `gym:` is set) | – |
 | `.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram control | `~/arbox/data/.env` on Oracle |
@@ -438,8 +439,8 @@ Why **not** fire 10 s early: an early POST returns *"registration not yet
 open"* and burns a retry slot for nothing. **250 ms** is the smallest
 offset that's:
 
-- big enough to cover **clock skew** (Fly VM clock vs Arbox server clock),
-- big enough to cover **network RTT** (~60–120 ms from Fly Frankfurt to Israel),
+- big enough to cover **clock skew** (VM clock vs Arbox server clock),
+- big enough to cover **network RTT** (~30–120 ms from most EU clouds to Israel),
 - small enough that the API server-side timestamp lands **at or just after** `WindowOpen`.
 
 If you ever see `❌ Booking failed` with a *"not open"* message, **raise**
@@ -522,7 +523,7 @@ Or stricter — just say so and we can wire a token-bucket on
   `schedule_id` simultaneously, and `booking_attempts.json` makes terminal
   outcomes survive process restarts.
 - The repo never contains personal gym names, phone numbers, or chat ids;
-  use `ARBOX_GYM` and Fly secrets for that data.
+  use `ARBOX_GYM` and your host's secret store for that data.
 
 ---
 
@@ -551,30 +552,7 @@ internal/notify/                 # Telegram + stdout notifiers
 scripts/deploy-oracle.sh         # manual deploy Mac → Oracle VM
 .github/workflows/oracle-deploy.yml  # CI: test + auto-deploy on merge to main
 docs/DEPLOY-ORACLE.md            # detailed Oracle walkthrough (production)
-docs/DEPLOY-FLY.md               # legacy Fly walkthrough (cold standby only)
+docs/FORK-SETUP.md               # "I want to run this for my own gym" guide
 ```
 
 PRs welcome. Tests must pass and stay deterministic (no fixed-date assumptions).
-
----
-
-## Fly.io (legacy / cold standby)
-
-The service ran on Fly.io from April 18–20, 2026 before the Cloudflare-vs-Fly
-block forced the Oracle cutover. The app (`arbox-scheduler.fly.dev`, one
-`shared-cpu-1x` machine in `fra`) is kept **stopped, not destroyed**:
-
-- Machine `185947ea234548` — `stopped`
-- Volume `vol_vz8kqqjlyo97n5jv` (1 GB) — preserved with the last `.env`,
-  `user_plan.yaml`, and `booking_attempts.json`
-
-To reactivate it as a rollback (temporary — Cloudflare will still block):
-
-```bash
-homefly machines start 185947ea234548 -a arbox-scheduler
-```
-
-Full historical walkthrough: [`docs/DEPLOY-FLY.md`](docs/DEPLOY-FLY.md).
-If after ~1 month the Oracle setup stays healthy, destroy the Fly app
-with `homefly apps destroy arbox-scheduler` to stop paying attention to
-it (it's still free, but it's noise in your `homefly apps list`).

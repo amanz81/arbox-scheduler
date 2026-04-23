@@ -40,7 +40,7 @@ const (
 
 // authMiddleware holds the configured tokens. Tokens are provided once at
 // boot from env vars; rotating the API tokens requires a daemon restart
-// (Fly secrets set + redeploy).
+// (update your host's secret store + redeploy).
 type authMiddleware struct {
 	readToken  string
 	adminToken string

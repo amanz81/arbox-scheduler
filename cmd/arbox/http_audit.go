@@ -43,7 +43,7 @@ type auditEntry struct {
 
 // auditLogPath returns the audit file location, honoring ARBOX_AUDIT_LOG.
 // Defaults next to the other state files (so locally it's the repo root,
-// on Fly it's /data).
+// on the production Oracle VM it's ~/arbox/data/).
 func auditLogPath() string {
 	if v := strings.TrimSpace(os.Getenv("ARBOX_AUDIT_LOG")); v != "" {
 		return v
@@ -129,7 +129,8 @@ func (a *auditLog) readTail(limit int, since time.Time) ([]auditEntry, error) {
 	return out, nil
 }
 
-// clientIP returns the best-effort client IP. On Fly, Fly-Client-IP is the
+// clientIP returns the best-effort client IP. If the request flowed through
+// a reverse proxy that injects Fly-Client-IP, that header is the
 // real edge; otherwise we fall back to the connection's RemoteAddr.
 func clientIP(r *http.Request) string {
 	if s := strings.TrimSpace(r.Header.Get("Fly-Client-IP")); s != "" {

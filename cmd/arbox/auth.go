@@ -18,7 +18,7 @@ import (
 	"github.com/amanz81/arbox-scheduler/internal/envfile"
 )
 
-// defaultEnvPathFallback is the local-dev default. On Fly.io / systemd the
+// defaultEnvPathFallback is the local-dev default. On systemd / containers the
 // real path comes from envfile.Path which checks ARBOX_ENV_FILE first.
 const defaultEnvPathFallback = ".env"
 

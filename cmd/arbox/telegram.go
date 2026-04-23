@@ -24,7 +24,7 @@ func newTelegramCmd() *cobra.Command {
 
 // newTelegramDiscoverCmd prints chat_id values seen in recent getUpdates.
 // After you open @YourBot and tap Start, run this with TELEGRAM_BOT_TOKEN
-// set (or in .env) and paste the printed chat_id into Fly secrets as
+// set (or in .env) and paste the printed chat_id into your host's secret store (.env / systemd EnvironmentFile / etc.) as
 // TELEGRAM_CHAT_ID.
 func newTelegramDiscoverCmd() *cobra.Command {
 	return &cobra.Command{
@@ -97,7 +97,7 @@ func newTelegramDiscoverCmd() *cobra.Command {
 					c.ID, c.Type, user, c.FirstName)
 			}
 			fmt.Println()
-			fmt.Println("Add to Fly (Secrets tab) or .env for local tests:")
+			fmt.Println("Add to your .env / host secret store:")
 			for id := range seen {
 				fmt.Printf("  TELEGRAM_CHAT_ID=%d\n", id)
 			}

@@ -14,7 +14,7 @@ import (
 // buildVersionReport returns a short multi-line string for /version.
 // It surfaces the deployed git revision (when injected via -ldflags or via
 // runtime/debug.ReadBuildInfo) along with the gym binding and timezone — the
-// most common things you'll want to confirm after a Fly deploy.
+// most common things you'll want to confirm after a deploy.
 func buildVersionReport(cfg *config.Config, locID, lookahead int) string {
 	loc := cfg.Location()
 	now := time.Now().In(loc)
