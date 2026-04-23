@@ -62,7 +62,10 @@ func NextOptions(cfg *config.Config, from time.Time, days int) ([]PlannedOption,
 	cursor := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	for i := 0; i < days; i++ {
 		d := cursor.AddDate(0, 0, i)
-		opts := cfg.OptionsFor(d.Weekday())
+		// OptionsForDate consults one-time overrides first, then falls back
+		// to the weekday plan — so "just this Sunday book Hall A instead"
+		// replaces what OptionsFor(Sunday) would have returned.
+		opts := cfg.OptionsForDate(d)
 		if len(opts) == 0 {
 			continue
 		}

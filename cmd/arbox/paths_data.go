@@ -48,3 +48,13 @@ func bookingAttemptsPath() string {
 	}
 	return filepath.Join(dataDir(), "booking_attempts.json")
 }
+
+// oneTimeOverridesPath is the YAML file that maps YYYY-MM-DD → DayConfig
+// overrides. Set via ARBOX_OVERRIDES_FILE for tests; default lives next to
+// user_plan.yaml so both follow the same ARBOX_ENV_FILE → dataDir() chain.
+func oneTimeOverridesPath() string {
+	if v := os.Getenv("ARBOX_OVERRIDES_FILE"); v != "" {
+		return v
+	}
+	return filepath.Join(dataDir(), "one_time_overrides.yaml")
+}

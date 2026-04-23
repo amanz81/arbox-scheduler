@@ -65,7 +65,15 @@ func loadValidated() (*config.Config, error) {
 	if err := c.MergeDaysFromFile(userPlanOverlayPath()); err != nil {
 		return nil, err
 	}
+	// Validate() resolves the timezone, which MergeOverridesFromFile needs
+	// for expired-entry pruning. Order matters here.
 	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	// Overrides are a separate file from user_plan.yaml so the Telegram
+	// "Just this Sunday" button can write one without touching the
+	// recurring plan.
+	if err := c.MergeOverridesFromFile(oneTimeOverridesPath()); err != nil {
 		return nil, err
 	}
 	return c, nil
