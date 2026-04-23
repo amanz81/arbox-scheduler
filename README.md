@@ -13,6 +13,13 @@ Tier VM**, ~7 MB RSS) and is controlled end-to-end from **Telegram**.
 - Works for any Arbox member; the gym, weekly plan, and class filters are
   all in `config.yaml` (or env vars).
 
+> **Running this for your own gym?** Start with
+> **[`docs/FORK-SETUP.md`](docs/FORK-SETUP.md)** — a step-by-step walkthrough
+> that assumes zero Go background and takes you from "empty machine" to
+> "daemon booking your classes" on Mac / Linux / Windows / Raspberry Pi.
+> Designed so your friend can clone this and have it working in 20 minutes
+> without reading any of the advanced sections below.
+
 > Designed and built with one specific gym in mind, but **everything
 > user-specific is parameterised** — see [Multi-user variables](#multi-user-variables).
 
@@ -61,8 +68,15 @@ You can pause it (`/pause 3d`), check live availability (`/morning`,
 
 ## Quick start (local)
 
-Requires Go **1.24+** and an Arbox _member_ account (the same email +
-password you use in the Arbox app).
+> **Forking for your own gym?** Use
+> [`docs/FORK-SETUP.md`](docs/FORK-SETUP.md) instead — same info plus
+> prerequisites, service-install recipes for Mac / Linux / Windows, and
+> troubleshooting. The block below is the fast-path for people who already
+> have Go set up.
+
+**Prereqs:** Go **1.24+** (`go version`), an Arbox _member_ account (same
+email + password you use on [site.arboxapp.com](https://site.arboxapp.com/)
+— not the gym-owner panel), a machine with a clock synced to the internet.
 
 ```bash
 # 1. Build
@@ -80,6 +94,7 @@ $EDITOR config.yaml     # set timezone, gym substring, weekly plan, category_fil
 ./bin/arbox selftest
 
 # 5. Inspect what it would do
+./bin/arbox classes list --days 3       # see your gym's real class names
 ./bin/arbox schedule list --days 7
 ./bin/arbox schedule resolve --days 7   # online; resolves against live Arbox classes
 
@@ -88,7 +103,14 @@ $EDITOR config.yaml     # set timezone, gym substring, weekly plan, category_fil
 ```
 
 The daemon stays in the foreground; press `Ctrl-C` to stop it. To run it
-unattended use systemd / launchd, **or** deploy to Fly.io (next section).
+unattended, see the launchd / systemd / Task Scheduler recipes in
+[`docs/FORK-SETUP.md § 7`](docs/FORK-SETUP.md#7-keeping-it-running-in-the-background),
+or deploy to a VPS via [`docs/DEPLOY-ORACLE.md`](docs/DEPLOY-ORACLE.md).
+
+> **⚠️ The LLM / API / MCP surface is OFF by default and should stay that
+> way until you've verified the booker itself works for at least a week.**
+> See [HTTP API](#http-api-llm-agents--nanobot) for the opt-in mechanism
+> and the security posture.
 
 ---
 
@@ -274,6 +296,25 @@ Only the chat id matching `TELEGRAM_CHAT_ID` is allowed to send commands.
 ---
 
 ## HTTP API (LLM agents / nanobot)
+
+> **🚨 Off by default. Keep it that way until you're ready.**
+>
+> The HTTP server **refuses to start** unless `ARBOX_API_READ_TOKEN` or
+> `ARBOX_API_ADMIN_TOKEN` is set. Leave both env vars unset and you get
+> zero LLM surface, zero attack surface — the daemon keeps doing its
+> booking job with no extra network exposure.
+>
+> **Don't enable the API until all of these are true:**
+> 1. The plain booker has been booking your classes correctly for at
+>    least a week, including at least one successful window strike.
+> 2. You understand that an LLM with the **admin** token can, in principle,
+>    book / cancel / pause anything — the `?confirm=1` gate helps but is
+>    not a substitute for trusting the client you wire up.
+> 3. You've read [`docs/API.md`](docs/API.md) and
+>    [`docs/NANOBOT.md`](docs/NANOBOT.md) end-to-end.
+>
+> There is no reason to enable this just to use the scheduler — Telegram
+> gives you the same status + setup interface without any of the LLM risk.
 
 The daemon also serves a small REST surface at `/api/v1/` for nanobot /
 Claude / OpenAI tool-calling. It runs in the same process as everything
