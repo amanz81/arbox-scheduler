@@ -214,9 +214,11 @@ func TestDSTFallBackSundayWindow(t *testing.T) {
 	}
 }
 
-// TestPriorityOptions: a day with multiple options produces one entry per
-// option, sharing the same ClassStart but different Priority values.
-func TestPriorityOptions(t *testing.T) {
+// TestLegacyMultiOptions_ClampedToFirst: a config with multiple options per
+// day parses cleanly for backwards compatibility, but Validate clamps to the
+// first entry (priority fallback was removed). The daemon must book exactly
+// one class per day — no hidden "fall back to option 2" behavior.
+func TestLegacyMultiOptions_ClampedToFirst(t *testing.T) {
 	loc := mustLoc(t)
 	cfg := &config.Config{
 		Timezone: "Asia/Jerusalem",
@@ -224,9 +226,9 @@ func TestPriorityOptions(t *testing.T) {
 			"monday": {
 				Enabled: true,
 				Options: []config.ClassOption{
-					{Time: "08:30", Category: "Hall B"},
-					{Time: "08:30", Category: "Hall A"},
-					{Time: "09:00", Category: "Hall B"},
+					{Time: "08:30", Category: "Hall B"}, // kept
+					{Time: "08:30", Category: "Hall A"}, // dropped
+					{Time: "09:00", Category: "Hall B"}, // dropped
 				},
 			},
 		},
@@ -239,25 +241,16 @@ func TestPriorityOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("want 3 options, got %d: %+v", len(got), got)
-	}
-	// First two share the same ClassStart (08:30), differ in priority.
-	if !got[0].ClassStart.Equal(got[1].ClassStart) {
-		t.Errorf("first two should share ClassStart: %v vs %v", got[0].ClassStart, got[1].ClassStart)
-	}
-	if got[0].Priority != 0 || got[1].Priority != 1 {
-		t.Errorf("priorities: got[0]=%d got[1]=%d", got[0].Priority, got[1].Priority)
+	// Only one PlannedOption per calendar day: there's exactly one Monday
+	// in the 2-day window (from Sunday), so we expect exactly one entry.
+	if len(got) != 1 {
+		t.Fatalf("want 1 option (one Monday in window), got %d: %+v", len(got), got)
 	}
 	if got[0].Category != "Hall B" {
-		t.Errorf("most-preferred category: %q", got[0].Category)
+		t.Errorf("kept category should be options[0]=Hall B, got %q", got[0].Category)
 	}
-	// Third option is 09:00, later ClassStart.
-	if !got[2].ClassStart.After(got[1].ClassStart) {
-		t.Errorf("third option should be after: %v", got[2].ClassStart)
-	}
-	if got[2].Priority != 2 {
-		t.Errorf("third priority: %d", got[2].Priority)
+	if got[0].Time != "08:30" {
+		t.Errorf("kept time should be options[0]=08:30, got %q", got[0].Time)
 	}
 }
 

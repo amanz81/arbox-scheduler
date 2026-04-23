@@ -225,54 +225,34 @@ func formatSelfTestReport(checks []selfCheck) string {
 // nextPlannedBookingsSummary returns up to `count` short lines describing the
 // next planned booking actions (one per ClassStart). Used in the daily
 // heartbeat so you can verify the daemon knows what it should do next.
+// nextPlannedBookingsSummary returns up to `count` upcoming booking lines.
+// One PlannedOption per calendar day now that priority fallback is gone —
+// so this is a straight render of opts, no grouping needed.
 func nextPlannedBookingsSummary(cfg *config.Config, days, count int) []string {
 	opts, err := schedule.NextOptions(cfg, time.Now().In(cfg.Location()), days)
 	if err != nil || len(opts) == 0 {
 		return nil
 	}
-	// Group by ClassStart so we collapse priorities (Hall B then Hall A) into
-	// one line per slot.
-	type group struct {
-		start  time.Time
-		window time.Time
-		opts   []schedule.PlannedOption
-	}
-	seen := map[time.Time]int{}
-	var groups []group
-	for _, o := range opts {
-		if i, ok := seen[o.ClassStart]; ok {
-			groups[i].opts = append(groups[i].opts, o)
-			continue
-		}
-		seen[o.ClassStart] = len(groups)
-		groups = append(groups, group{start: o.ClassStart, window: o.WindowOpen, opts: []schedule.PlannedOption{o}})
-	}
-
 	now := time.Now().In(cfg.Location())
 	var lines []string
-	for _, g := range groups {
-		if !g.start.After(now) {
+	for _, o := range opts {
+		if !o.ClassStart.After(now) {
 			continue
 		}
-		// Compose category list "Hall B then Hall A" (priority order).
-		var names []string
-		for _, o := range g.opts {
-			n := strings.TrimSpace(o.Category)
-			if n == "" {
-				n = "(filter)"
-			}
-			names = append(names, n)
+		cat := strings.TrimSpace(o.Category)
+		if cat == "" {
+			cat = "(filter)"
 		}
 		var dur string
-		if g.window.After(now) {
-			dur = "in " + shortDuration(g.window.Sub(now).Round(time.Minute))
+		if o.WindowOpen.After(now) {
+			dur = "in " + shortDuration(o.WindowOpen.Sub(now).Round(time.Minute))
 		} else {
 			dur = "WINDOW OPEN NOW"
 		}
 		lines = append(lines, fmt.Sprintf("%s — %s · window %s (%s)",
-			g.start.Format("Mon 02 Jan 15:04"),
-			strings.Join(names, " then "),
-			g.window.Format("Mon 02 Jan 15:04"),
+			o.ClassStart.Format("Mon 02 Jan 15:04"),
+			cat,
+			o.WindowOpen.Format("Mon 02 Jan 15:04"),
 			dur))
 		if len(lines) >= count {
 			break

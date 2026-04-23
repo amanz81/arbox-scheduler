@@ -117,15 +117,18 @@ func pruneAttempts(s *attemptsState, now time.Time) {
 	}
 }
 
-// bookSlot is one (date, time) the daemon may book. Holds the planned options
-// for that slot in priority order.
+// bookSlot is one (date, time) the daemon may book. Exactly one option per
+// slot now that priority fallback is removed; Options stays a slice to keep
+// the function signature stable but will have len==1 in practice.
 type bookSlot struct {
 	ClassStart time.Time
 	Options    []schedule.PlannedOption
 }
 
 // groupOptionsBySlot groups a flat option list by ClassStart, sorted by start.
-// Within each group options stay in priority order.
+// In the current one-option-per-day world each ClassStart only has a single
+// PlannedOption, so the inner group is trivially len==1; keeping the grouping
+// shape means downstream callers that used to iterate Options still compile.
 func groupOptionsBySlot(opts []schedule.PlannedOption) []bookSlot {
 	byStart := map[time.Time][]schedule.PlannedOption{}
 	var keys []time.Time
@@ -138,9 +141,7 @@ func groupOptionsBySlot(opts []schedule.PlannedOption) []bookSlot {
 	sort.Slice(keys, func(i, j int) bool { return keys[i].Before(keys[j]) })
 	out := make([]bookSlot, 0, len(keys))
 	for _, k := range keys {
-		row := byStart[k]
-		sort.SliceStable(row, func(i, j int) bool { return row[i].Priority < row[j].Priority })
-		out = append(out, bookSlot{ClassStart: k, Options: row})
+		out = append(out, bookSlot{ClassStart: k, Options: byStart[k]})
 	}
 	return out
 }

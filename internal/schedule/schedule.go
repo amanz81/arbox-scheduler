@@ -20,15 +20,18 @@ import (
 )
 
 // PlannedOption is one actionable class wish for a specific future date.
-// A single day with multiple priorities produces multiple PlannedOptions that
-// share the same Date but differ in Priority (0 = most preferred).
+// Exactly one PlannedOption per scheduled calendar day — priority-list
+// fallback (multiple options per day) was removed in favor of the explicit
+// one-time override file (see config.OneTimeOverrides) for "just this
+// Sunday book Hall A instead" use cases. Having waitlisted slot + booked
+// fallback at the same time was confusing; now you get exactly what you
+// picked or a clean "no match" log line.
 type PlannedOption struct {
-	ClassStart time.Time   // local time, in cfg.Location()
-	WindowOpen time.Time   // local time, in cfg.Location()
+	ClassStart time.Time // local time, in cfg.Location()
+	WindowOpen time.Time // local time, in cfg.Location()
 	Weekday    time.Weekday
-	Priority   int         // 0-based; 0 = most preferred for this day
-	Time       string      // "HH:MM" copied from config, for display
-	Category   string      // optional substring filter copied from config
+	Time       string // "HH:MM" copied from config, for display
+	Category   string // optional substring filter copied from config
 }
 
 // SundayBookingLead is the Sunday-specific lead time.
@@ -45,12 +48,16 @@ func leadFor(day time.Weekday) time.Duration {
 	return DefaultBookingLead
 }
 
-// NextOptions returns planned class options for the `days` calendar days
-// starting on `from`, expanded from each day's priority list in cfg. A day
-// with N options contributes N entries (same date, priorities 0..N-1).
-// Entries are sorted by ClassStart asc, then Priority asc.
+// NextOptions returns at most one PlannedOption per calendar day in the
+// `days` window starting at `from`. Source of truth (in precedence order):
 //
-// Disabled days and calendar days whose class_start <= `from` are skipped.
+//  1. cfg.OneTimeOverrides[YYYY-MM-DD] — if set, replaces the weekday plan
+//  2. cfg.Days[weekday]                 — the recurring weekly plan
+//
+// Both layers yield at most one ClassOption (enforced by Config.Validate),
+// so the output is a flat list sorted by ClassStart ascending. Days that
+// are disabled, unmapped, or whose class_start has already passed are
+// skipped.
 func NextOptions(cfg *config.Config, from time.Time, days int) ([]PlannedOption, error) {
 	loc := cfg.Location()
 	if loc == nil {
@@ -62,38 +69,33 @@ func NextOptions(cfg *config.Config, from time.Time, days int) ([]PlannedOption,
 	cursor := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, loc)
 	for i := 0; i < days; i++ {
 		d := cursor.AddDate(0, 0, i)
-		// OptionsForDate consults one-time overrides first, then falls back
-		// to the weekday plan — so "just this Sunday book Hall A instead"
-		// replaces what OptionsFor(Sunday) would have returned.
 		opts := cfg.OptionsForDate(d)
 		if len(opts) == 0 {
 			continue
 		}
-		for idx, opt := range opts {
-			hour, minute, err := parseHHMM(opt.Time)
-			if err != nil {
-				return nil, fmt.Errorf("%s option[%d]: %w", d.Weekday(), idx, err)
-			}
-			classStart := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, loc)
-			if !classStart.After(from) {
-				continue
-			}
-			out = append(out, PlannedOption{
-				ClassStart: classStart,
-				WindowOpen: classStart.Add(-leadFor(d.Weekday())),
-				Weekday:    d.Weekday(),
-				Priority:   idx,
-				Time:       opt.Time,
-				Category:   opt.Category,
-			})
+		// Defensive: OptionsForDate returns at most one option per day.
+		// If that contract is ever violated we'd silently book something
+		// unexpected, so take only opts[0] explicitly.
+		opt := opts[0]
+		hour, minute, err := parseHHMM(opt.Time)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Weekday(), err)
 		}
+		classStart := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, loc)
+		if !classStart.After(from) {
+			continue
+		}
+		out = append(out, PlannedOption{
+			ClassStart: classStart,
+			WindowOpen: classStart.Add(-leadFor(d.Weekday())),
+			Weekday:    d.Weekday(),
+			Time:       opt.Time,
+			Category:   opt.Category,
+		})
 	}
 
 	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].ClassStart.Equal(out[j].ClassStart) {
-			return out[i].ClassStart.Before(out[j].ClassStart)
-		}
-		return out[i].Priority < out[j].Priority
+		return out[i].ClassStart.Before(out[j].ClassStart)
 	})
 	return out, nil
 }

@@ -45,8 +45,11 @@ Tier VM**, ~7 MB RSS) and is controlled end-to-end from **Telegram**.
 
 ## What it does
 
-You declare a weekly plan like _"Sunday 08:00 prefer Hall B, fall back to
-Hall A; Monday 08:30 same; rest day Wed/Sat"_.
+You declare a weekly plan like _"Sunday 08:00 Hall B; Monday 08:30 Hall B;
+rest day Wed/Sat"_ — one class per day, no fallback list (that got
+confusing when you'd end up on one waitlist AND booked into another). Need
+"just this Sunday book Hall A instead"? Use the one-time override file
+via Telegram `/setup → 📅 Just Sun 26 Apr`.
 
 The daemon:
 
@@ -239,22 +242,21 @@ category_filter:
   exclude: ["Open Box", "Kids", "Teens"]
 
 days:
-  sunday:
-    enabled: true
-    options:
-      - { time: "08:00", category: "Hall B" }    # priority 0 — preferred
-      - { time: "08:00", category: "Hall A" }    # priority 1 — fallback
-  monday:    { enabled: true, time: "08:30" }
-  tuesday:   { enabled: true, time: "09:00", category: "Weightlifting" }
+  sunday:    { enabled: true,  time: "08:00", category: "Hall B" }
+  monday:    { enabled: true,  time: "08:30" }
+  tuesday:   { enabled: true,  time: "09:00", category: "Weightlifting" }
   wednesday: { enabled: false }                  # rest day
-  thursday:  { enabled: true, time: "08:30" }
-  friday:    { enabled: true, time: "11:00" }
+  thursday:  { enabled: true,  time: "08:30" }
+  friday:    { enabled: true,  time: "11:00" }
   saturday:  { enabled: false }
 ```
 
-`category` is a substring; first matching live class is used. Per-day
-priority list: index 0 is most preferred. Daemon tries 0 first, falls back
-to 1, etc., **inside the burst** (every 1 s for up to 45 s).
+`category` is a substring; the first matching live class is booked.
+**One class per weekday, no priority-list fallback** — if the class
+doesn't exist or is full, the daemon tries waitlist on that same class
+and stops. For "just this Sunday book Hall A instead," use Telegram
+`/setup → 📅 Just Sun 26 Apr` to write a one-time override; the
+recurring plan stays untouched.
 
 ### Generating the plan from the gym (recommended)
 
@@ -432,7 +434,7 @@ For a window of `T = 08:00:00.000` (Israel time):
 | `T − 8 s` | Wake; reload config; check `/pause`; **auth probe** (1 GET) so a stale token re-logins now, not at the strike | `proactiveLead = 8s` |
 | `T − 250 ms` | `STRIKE` log line; **first `BookClass` POST** sent | `proactiveStrikeOffset = 250ms` |
 | `T + ~0–600 ms` | API receives the POST right around `T` (the offset compensates for clock skew + network RTT) | – |
-| every `+1 s` after | Next attempt: `BookClass` for the next priority tier, or `JoinWaitlist` if class is full | `burstInterval = 1s` |
+| every `+1 s` after | Retry `BookClass` on the same class if the server returned "not yet open"; switch to `JoinWaitlist` once the class is reported full | `burstInterval = 1s` |
 | stop | First `BOOKED`/`WAITLIST` **or** `T + 45 s` **or** `ClassStart − 1 s` | `burstDuration = 45s` |
 
 Why **not** fire 10 s early: an early POST returns *"registration not yet

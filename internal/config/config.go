@@ -201,6 +201,25 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Sprintf("%s: options[%d].time %q is not HH:MM", day, i, opt.Time))
 			}
 		}
+		// Priority-list fallback was removed on purpose (see PR notes: a
+		// waitlist entry on the fallback class PLUS a BOOKED spot on the
+		// preferred class was confusing, and the new per-date overrides
+		// file covers "just this time, book X instead"). If legacy YAML
+		// still ships multiple options we clamp to the first and log it —
+		// validate surfaces the drop so the user notices + can remove
+		// dead entries from their file.
+		if len(d.Options) > 1 {
+			dropped := d.Options[1:]
+			dropList := make([]string, 0, len(dropped))
+			for _, o := range dropped {
+				dropList = append(dropList, fmt.Sprintf("%s/%s", o.Time, o.Category))
+			}
+			fmt.Fprintf(os.Stderr,
+				"[config] %s: priority fallback is no longer supported; keeping only options[0]=%s/%s, dropping %d fallback(s): %s\n",
+				day, d.Options[0].Time, d.Options[0].Category, len(dropped), strings.Join(dropList, ", "))
+			d.Options = d.Options[:1]
+			c.Days[day] = d
+		}
 		if d.Enabled {
 			if d.Time == "" && len(d.Options) == 0 && c.DefaultTime == "" {
 				errs = append(errs,
@@ -225,12 +244,14 @@ func (c *Config) Location() *time.Location {
 	return c.loc
 }
 
-// OptionsFor returns the ordered priority list of ClassOptions for a day, or
-// nil if the day is disabled/missing/unresolvable. A single-option day
-// (shorthand `time:`) is returned as a one-element slice. The default_time
-// fallback is applied when neither `time:` nor `options:` is set.
+// OptionsFor returns the ClassOption for a day as a single-element slice, or
+// nil if the day is disabled/missing/unresolvable.
 //
-// The returned slice is always in priority order; index 0 is most preferred.
+// Priority-list fallback (multiple options per day) was removed: see
+// Validate — any legacy multi-option YAML is clamped to options[0] with a
+// stderr warning. The slice-of-one return shape is kept so callers that used
+// to iterate options still compile; every call site now runs at most one
+// iteration.
 func (c *Config) OptionsFor(day time.Weekday) []ClassOption {
 	key := strings.ToLower(day.String())
 	d, ok := c.Days[key]
@@ -238,9 +259,9 @@ func (c *Config) OptionsFor(day time.Weekday) []ClassOption {
 		return nil
 	}
 	if len(d.Options) > 0 {
-		out := make([]ClassOption, len(d.Options))
-		copy(out, d.Options)
-		return out
+		// Clamp to the first entry (Validate should already have trimmed
+		// this, but be defensive in case someone built a Config programmatically).
+		return []ClassOption{d.Options[0]}
 	}
 	t := d.Time
 	if t == "" {

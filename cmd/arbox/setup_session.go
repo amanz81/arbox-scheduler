@@ -98,19 +98,27 @@ func seedSetupPicksFromConfig(cfg *config.Config, cands map[string][]setupCandid
 	return picks
 }
 
+// togglePick is RADIO-style: at most one selection per day. Priority-list
+// fallback was removed (it was confusing to end up waitlisted on Hall B
+// AND booked into Hall A the same morning). New semantics:
+//   - tap a new index → becomes the single pick; any prior pick is replaced
+//   - tap the currently-picked index → clears it (day becomes a rest day)
+//
+// Returns a short human action label for the Telegram callback ack.
 func togglePick(s *setupSession, dayKey string, idx int) string {
 	if s.Picks == nil {
 		s.Picks = map[string][]int{}
 	}
 	cur := s.Picks[dayKey]
-	for i, v := range cur {
-		if v == idx {
-			s.Picks[dayKey] = append(cur[:i], cur[i+1:]...)
-			return "removed"
-		}
+	if len(cur) == 1 && cur[0] == idx {
+		s.Picks[dayKey] = nil
+		return "cleared (rest day)"
 	}
-	s.Picks[dayKey] = append(cur, idx)
-	return "added"
+	s.Picks[dayKey] = []int{idx}
+	if len(cur) == 0 {
+		return "selected"
+	}
+	return "replaced"
 }
 
 // writeUserPlanFromSession builds user_plan.yaml from picks + candidates and

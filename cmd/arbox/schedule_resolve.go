@@ -76,7 +76,7 @@ that date; the booker will skip them.`,
 
 			// Render.
 			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "DAY\tDATE\tTIME\tPRI\tOPTION CATEGORY\tSTATUS\tRESOLVED CATEGORY\tSPOTS\tFREE\tWAITLIST\tYOU\tSCHEDULE_ID\tWINDOW OPEN")
+			fmt.Fprintln(tw, "DAY\tDATE\tTIME\tOPTION CATEGORY\tSTATUS\tRESOLVED CATEGORY\tSPOTS\tFREE\tWAITLIST\tYOU\tSCHEDULE_ID\tWINDOW OPEN")
 			for _, o := range opts {
 				key := o.ClassStart.Format("2006-01-02")
 				matches := resolveOption(o, byDate[key], c.CategoryFilter)
@@ -87,8 +87,8 @@ that date; the booker will skip them.`,
 
 				switch len(matches) {
 				case 0:
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-						o.Weekday.String()[:3], key, o.Time, o.Priority, optCat,
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						o.Weekday.String()[:3], key, o.Time, optCat,
 						"(no match)", "-", "-", "-", "-", "-", "-",
 						o.WindowOpen.Format("2006-01-02 15:04 MST"))
 				case 1:
@@ -98,8 +98,8 @@ that date; the booker will skip them.`,
 					if you != "" {
 						status = you
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%d/%d\t%d\t%d\t%s\t%d\t%s\n",
-						o.Weekday.String()[:3], key, o.Time, o.Priority, optCat,
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d/%d\t%d\t%d\t%s\t%d\t%s\n",
+						o.Weekday.String()[:3], key, o.Time, optCat,
 						status, cl.ResolvedCategoryName(),
 						cl.Registered, cl.MaxUsers, cl.Free, cl.StandBy,
 						nonEmpty(you, "-"), cl.ID,
@@ -109,8 +109,8 @@ that date; the booker will skip them.`,
 					for _, m := range matches {
 						names = append(names, m.ResolvedCategoryName())
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t-\t-\t-\t-\t-\t%s\n",
-						o.Weekday.String()[:3], key, o.Time, o.Priority, optCat,
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t%s\n",
+						o.Weekday.String()[:3], key, o.Time, optCat,
 						"(ambiguous)", strings.Join(names, " | "),
 						o.WindowOpen.Format("2006-01-02 15:04 MST"))
 				}
@@ -218,50 +218,31 @@ func printPreferred(w *os.File, opts []schedule.PlannedOption, byDate map[string
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "DAY\tCLASS START\tTARGET CATEGORY\tSPOTS\tFREE\tWAITLIST\tYOU\tSCHEDULE_ID\tWINDOW OPEN")
 
-	// Group by ClassStart and sort priorities within each group.
-	type key struct{ Start time.Time }
-	groups := map[time.Time][]schedule.PlannedOption{}
-	var starts []time.Time
-	for _, o := range opts {
-		if _, ok := groups[o.ClassStart]; !ok {
-			starts = append(starts, o.ClassStart)
-		}
-		groups[o.ClassStart] = append(groups[o.ClassStart], o)
-	}
-	sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
+	// One option per ClassStart now that priority fallback is gone. Sort by
+	// class start and resolve each one against live classes.
+	sort.SliceStable(opts, func(i, j int) bool { return opts[i].ClassStart.Before(opts[j].ClassStart) })
 
-	for _, start := range starts {
-		day := groups[start]
-		sort.SliceStable(day, func(i, j int) bool { return day[i].Priority < day[j].Priority })
-		var winner *arboxapi.Class
-		var winnerOpt schedule.PlannedOption
-		for _, o := range day {
-			matches := resolveOption(o, byDate[o.ClassStart.Format("2006-01-02")], flt)
-			if len(matches) >= 1 {
-				w := matches[0]
-				winner = &w
-				winnerOpt = o
-				break
-			}
-		}
-		if winner == nil {
+	for _, o := range opts {
+		matches := resolveOption(o, byDate[o.ClassStart.Format("2006-01-02")], flt)
+		if len(matches) == 0 {
 			fmt.Fprintf(tw, "%s\t%s\t(no option matched)\t-\t-\t-\t-\t-\t%s\n",
-				start.Weekday().String()[:3],
-				start.Format("2006-01-02 15:04 MST"),
-				day[0].WindowOpen.Format("2006-01-02 15:04 MST"))
+				o.ClassStart.Weekday().String()[:3],
+				o.ClassStart.Format("2006-01-02 15:04 MST"),
+				o.WindowOpen.Format("2006-01-02 15:04 MST"))
 			continue
 		}
+		winner := matches[0]
 		you := winner.YouStatus()
 		if you == "" {
 			you = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s (pri=%d)\t%d/%d\t%d\t%d\t%s\t%d\t%s\n",
-			start.Weekday().String()[:3],
-			start.Format("2006-01-02 15:04 MST"),
-			winner.ResolvedCategoryName(), winnerOpt.Priority,
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d/%d\t%d\t%d\t%s\t%d\t%s\n",
+			o.ClassStart.Weekday().String()[:3],
+			o.ClassStart.Format("2006-01-02 15:04 MST"),
+			winner.ResolvedCategoryName(),
 			winner.Registered, winner.MaxUsers,
 			winner.Free, winner.StandBy, you, winner.ID,
-			winnerOpt.WindowOpen.Format("2006-01-02 15:04 MST"))
+			o.WindowOpen.Format("2006-01-02 15:04 MST"))
 	}
 	_ = tw.Flush()
 }
@@ -848,46 +829,27 @@ func buildWeeklyAvailableReport(ctx context.Context, c *config.Config, client *a
 			}
 		}
 
-		b.WriteString("\nC) Best matching class per slot (same slot as B, but only the winning plan tier):\n")
-		groups := map[time.Time][]schedule.PlannedOption{}
-		var starts []time.Time
-		for _, o := range opts {
-			if _, ok := groups[o.ClassStart]; !ok {
-				starts = append(starts, o.ClassStart)
-			}
-			groups[o.ClassStart] = append(groups[o.ClassStart], o)
-		}
-		sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
+		b.WriteString("\nC) Matching class per slot (one option per day — no priority fallback):\n")
+		sort.SliceStable(opts, func(i, j int) bool { return opts[i].ClassStart.Before(opts[j].ClassStart) })
 
-		for _, classStart := range starts {
-			day := groups[classStart]
-			sort.SliceStable(day, func(i, j int) bool { return day[i].Priority < day[j].Priority })
-			var winner *arboxapi.Class
-			var winnerOpt schedule.PlannedOption
-			for _, o := range day {
-				matches := resolveOption(o, allBy[o.ClassStart.Format("2006-01-02")], c.CategoryFilter)
-				if len(matches) >= 1 {
-					w := matches[0]
-					winner = &w
-					winnerOpt = o
-					break
-				}
-			}
-			if winner == nil {
-				fmt.Fprintf(&b, "· %s → no plan tier matched a live class | window %s\n",
-					classStart.Format("Mon 02 Jan 15:04"),
-					day[0].WindowOpen.Format("Mon 02 Jan 15:04"))
+		for _, o := range opts {
+			matches := resolveOption(o, allBy[o.ClassStart.Format("2006-01-02")], c.CategoryFilter)
+			if len(matches) == 0 {
+				fmt.Fprintf(&b, "· %s → no match in the live schedule | window %s\n",
+					o.ClassStart.Format("Mon 02 Jan 15:04"),
+					o.WindowOpen.Format("Mon 02 Jan 15:04"))
 				continue
 			}
+			winner := matches[0]
 			you := winner.YouStatus()
 			if you == "" {
 				you = "-"
 			}
 			fmt.Fprintf(&b, "· %s → %s | free %d wl %d you %s | id %d | window %s\n",
-				classStart.Format("Mon 02 Jan 15:04"),
+				o.ClassStart.Format("Mon 02 Jan 15:04"),
 				winner.ResolvedCategoryName(),
 				winner.Free, winner.StandBy, you, winner.ID,
-				winnerOpt.WindowOpen.Format("Mon 02 Jan 15:04"))
+				o.WindowOpen.Format("Mon 02 Jan 15:04"))
 		}
 	}
 

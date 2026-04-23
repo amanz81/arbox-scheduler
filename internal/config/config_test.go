@@ -68,16 +68,18 @@ days:
 	if err := c.Validate(); err != nil {
 		t.Fatalf("valid: %v", err)
 	}
+	// Legacy multi-option YAML is accepted but clamped to options[0] —
+	// priority fallback was removed. Validate emits a stderr warning.
 	mon := c.OptionsFor(time.Monday)
-	if len(mon) != 2 {
-		t.Fatalf("monday options: %+v", mon)
+	if len(mon) != 1 {
+		t.Fatalf("monday options should be clamped to 1, got %+v", mon)
 	}
-	if mon[0].Category != "Crossfit Hall B" || mon[1].Category != "CrossFit- Hall A" {
-		t.Errorf("monday priority: %+v", mon)
+	if mon[0].Category != "Crossfit Hall B" {
+		t.Errorf("monday kept entry should be options[0]=Crossfit Hall B, got %+v", mon)
 	}
 	tue := c.OptionsFor(time.Tuesday)
-	if len(tue) != 2 || tue[0].Time != "09:00" || tue[1].Time != "08:00" {
-		t.Errorf("tuesday options: %+v", tue)
+	if len(tue) != 1 || tue[0].Time != "09:00" {
+		t.Errorf("tuesday should clamp to options[0]=09:00, got %+v", tue)
 	}
 }
 

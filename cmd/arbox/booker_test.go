@@ -8,15 +8,16 @@ import (
 	"github.com/amanz81/arbox-scheduler/internal/schedule"
 )
 
-func TestGroupOptionsBySlot_orderAndPriority(t *testing.T) {
+// TestGroupOptionsBySlot_sortsByStart: priority fallback was removed; each
+// ClassStart now has exactly one PlannedOption. This test just guards the
+// by-start ordering that downstream booker logic depends on.
+func TestGroupOptionsBySlot_sortsByStart(t *testing.T) {
 	loc := time.UTC
 	t1 := time.Date(2026, 4, 19, 8, 0, 0, 0, loc)
 	t2 := time.Date(2026, 4, 20, 8, 30, 0, 0, loc)
 	in := []schedule.PlannedOption{
-		{ClassStart: t2, Priority: 1, Time: "08:30", Category: "Hall A"},
-		{ClassStart: t1, Priority: 1, Time: "08:00", Category: "Hall A"},
-		{ClassStart: t1, Priority: 0, Time: "08:00", Category: "Hall B"},
-		{ClassStart: t2, Priority: 0, Time: "08:30", Category: "Hall B"},
+		{ClassStart: t2, Time: "08:30", Category: "Hall B"},
+		{ClassStart: t1, Time: "08:00", Category: "Hall B"},
 	}
 	got := groupOptionsBySlot(in)
 	if len(got) != 2 {
@@ -25,11 +26,8 @@ func TestGroupOptionsBySlot_orderAndPriority(t *testing.T) {
 	if !got[0].ClassStart.Equal(t1) || !got[1].ClassStart.Equal(t2) {
 		t.Fatalf("groups not sorted by start: %#v", got)
 	}
-	if got[0].Options[0].Priority != 0 || got[0].Options[1].Priority != 1 {
-		t.Fatalf("priority order wrong inside slot 0: %#v", got[0].Options)
-	}
-	if got[1].Options[0].Category != "Hall B" {
-		t.Fatalf("priority 0 should be Hall B in slot 1: %#v", got[1].Options)
+	if len(got[0].Options) != 1 || got[0].Options[0].Category != "Hall B" {
+		t.Fatalf("expected single-option-per-slot: %#v", got[0].Options)
 	}
 }
 

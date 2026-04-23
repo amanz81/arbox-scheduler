@@ -96,7 +96,7 @@ func newScheduleListCmd() *cobra.Command {
 			}
 
 			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "DAY\tCLASS START\tPRI\tCATEGORY\tWINDOW OPEN (local)\tWINDOW OPEN (UTC)\tCOUNTDOWN")
+			fmt.Fprintln(tw, "DAY\tCLASS START\tCATEGORY\tWINDOW OPEN (local)\tWINDOW OPEN (UTC)\tCOUNTDOWN")
 			for _, o := range opts {
 				cd := o.WindowOpen.Sub(now).Round(time.Minute)
 				if cd < 0 {
@@ -106,10 +106,9 @@ func newScheduleListCmd() *cobra.Command {
 				if cat == "" {
 					cat = "(global filter)"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 					o.Weekday,
 					o.ClassStart.Format("2006-01-02 15:04 MST"),
-					o.Priority,
 					cat,
 					o.WindowOpen.Format("2006-01-02 15:04 MST"),
 					o.WindowOpen.UTC().Format("2006-01-02 15:04 MST"),

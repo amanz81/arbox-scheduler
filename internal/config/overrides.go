@@ -112,9 +112,10 @@ func (c *Config) OptionsForDate(d time.Time) []ClassOption {
 				return nil
 			}
 			if len(override.Options) > 0 {
-				out := make([]ClassOption, len(override.Options))
-				copy(out, override.Options)
-				return out
+				// Same one-option-per-day rule as OptionsFor: clamp to
+				// options[0]. Multi-option overrides would re-introduce
+				// the waitlist-plus-booked confusion we just removed.
+				return []ClassOption{override.Options[0]}
 			}
 			t := override.Time
 			if t == "" {

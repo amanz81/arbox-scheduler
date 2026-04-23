@@ -266,16 +266,16 @@ func tick(ctx context.Context, cfg *config.Config, client *arboxapi.Client, locI
 		fmt.Println("  (all lookahead windows are already open)")
 		return "alive · all booking windows in lookahead are already open", nil
 	}
-	fmt.Printf("  next window opens in %s @ %s — %s %s (pri=%d, cat=%q)\n",
+	fmt.Printf("  next window opens in %s @ %s — %s %s (cat=%q)\n",
 		next.WindowOpen.Sub(now).Round(time.Second),
 		next.WindowOpen.Format("2006-01-02 15:04 MST"),
-		next.Weekday, next.Time, next.Priority, next.Category)
+		next.Weekday, next.Time, next.Category)
 
 	summary = fmt.Sprintf(
-		"alive · next in %s · window %s · %s %s · pri %d · %s",
+		"alive · next in %s · window %s · %s %s · %s",
 		next.WindowOpen.Sub(now).Round(time.Second),
 		next.WindowOpen.Format("Mon 02 Jan 15:04"),
 		next.Weekday, next.Time,
-		next.Priority, next.Category)
+		next.Category)
 	return summary, nil
 }
