@@ -113,6 +113,13 @@ type Config struct {
 	// member of multiple gyms). Matched against box name and location name.
 	Gym string `yaml:"gym,omitempty"`
 
+	// OneTimeOverrides is populated from one_time_overrides.yaml (a separate
+	// file from user_plan.yaml). Map key is YYYY-MM-DD; the DayConfig applies
+	// ONLY to that date and takes precedence over Days[weekday]. Written by
+	// Telegram's per-day "Just Sun 26 Apr" save button; read by the scheduler
+	// via OptionsForDate. See overrides.go.
+	OneTimeOverrides OneTimeOverrides `yaml:"-"`
+
 	loc *time.Location
 }
 

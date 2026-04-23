@@ -276,8 +276,8 @@ no restart needed.
 | `/status` | Saved selections per weekday + your real Arbox bookings (shows `WAITLIST N/M` when you're waitlisted) |
 | `/morning [HH-HH] [days\|week]` | Live class list, default 06–12 next 1 day, with waitlist position |
 | `/evening [HH-HH] [days\|week]` | Live class list, default 16–22 next 1 day, with waitlist position |
-| `/setup` | Inline buttons: pick weekly slots from real Arbox classes |
-| `/setupdone` | Save `/setup` selections to `user_plan.yaml` |
+| `/setup` | Inline buttons: pick weekly slots from real Arbox classes. Each day has two save buttons: **💾 Every {Sunday}** (persists to `user_plan.yaml`, every future week) and **📅 Just {Sun 26 Apr}** (one-time override for just that date). |
+| `/setupdone` | Bulk-save every day's selections to `user_plan.yaml` (alternative to per-day save buttons) |
 | `/setupcancel` | Discard the in-progress `/setup` session |
 | `/pause [Nh\|Nd\|until DATE [HH:MM]] [reason]` | Stop auto-booking (default 24h) |
 | `/resume` | Resume auto-booking |

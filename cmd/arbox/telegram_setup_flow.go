@@ -82,7 +82,11 @@ func handleTelegramSetup(ctx context.Context, hc *http.Client, base string, chat
 		"",
 		notify.EscapeMarkdownV2("Order: first tap = top priority. Existing ✓ are seeded from your saved plan."),
 		"",
-		notify.EscapeMarkdownV2("Finish: /setupdone to save · /setupcancel to discard."),
+		notify.EscapeMarkdownV2("Save modes (each day has its own pair of buttons):"),
+		notify.EscapeMarkdownV2("  💾  Every {Sunday} — persists this day to user_plan.yaml, every future week"),
+		notify.EscapeMarkdownV2("  📅  Just {Sun 26 Apr} — one-time override for only that date; recurring plan untouched"),
+		"",
+		notify.EscapeMarkdownV2("Bulk finish: /setupdone to save every day at once · /setupcancel to discard."),
 	}
 	_ = tgSendMessage(ctx, hc, base, chatID, strings.Join(headLines, "\n"), replyTo)
 
@@ -91,12 +95,13 @@ func handleTelegramSetup(ctx context.Context, hc *http.Client, base string, chat
 		if !ok || len(row) == 0 {
 			continue
 		}
-		kb, kbErr := buildSetupInlineKeyboard(dayKey, row, sess.Picks[dayKey])
+		dateLabel := nextWeekdayDateLabel(dayKey, cfg)
+		kb, kbErr := buildSetupInlineKeyboard(dayKey, row, sess.Picks[dayKey], dateLabel)
 		if kbErr != nil {
 			return kbErr
 		}
 		title := "*" + notify.EscapeMarkdownV2(prettyDayKey(dayKey)) + "*"
-		if dateLabel := nextWeekdayDateLabel(dayKey, cfg); dateLabel != "" {
+		if dateLabel != "" {
 			title += "  " + notify.EscapeMarkdownV2("· "+dateLabel)
 		}
 		if err := tgSendMessageWithKeyboard(ctx, hc, base, chatID, title, 0, kb); err != nil {
@@ -131,8 +136,12 @@ func nextWeekdayDateLabel(dayKey string, cfg *config.Config) string {
 const setupButtonsPerRow = 2
 
 // buildSetupInlineKeyboard returns Telegram inline_keyboard rows; button text
-// is capped at 64 chars. prefix shows selection state (✓ / ○).
-func buildSetupInlineKeyboard(dayKey string, row []setupCandidate, picks []int) ([][]map[string]string, error) {
+// is capped at 64 chars. prefix shows selection state (✓ / ○). Appends a
+// final save-row with the two commit options: "💾 Every {Sunday}" persists
+// the weekday to user_plan.yaml; "📅 Just {Sun 26 Apr}" writes a one-time
+// override for that specific date. Callers pass `dateLabel` for the one-time
+// button ("26 Apr" style); leave empty to omit the one-time button.
+func buildSetupInlineKeyboard(dayKey string, row []setupCandidate, picks []int, dateLabel string) ([][]map[string]string, error) {
 	inPick := make(map[int]bool, len(picks))
 	for _, idx := range picks {
 		inPick[idx] = true
@@ -161,14 +170,55 @@ func buildSetupInlineKeyboard(dayKey string, row []setupCandidate, picks []int) 
 	if len(cur) > 0 {
 		kb = append(kb, cur)
 	}
+
+	// Save-row: always include persist; include one-time only when we can
+	// compute a concrete date. Keep both on the same row so phones show
+	// them side-by-side.
+	pretty := prettyDayKey(dayKey)
+	saveRow := []map[string]string{
+		{
+			"text":          truncateRunes("💾 Every "+pretty, 64),
+			"callback_data": "sp|" + dayKey,
+		},
+	}
+	if strings.TrimSpace(dateLabel) != "" {
+		saveRow = append(saveRow, map[string]string{
+			"text":          truncateRunes("📅 Just "+pretty[:3]+" "+dateLabel, 64),
+			"callback_data": "so|" + dayKey,
+		})
+	}
+	kb = append(kb, saveRow)
+
 	return kb, nil
 }
 
+// handleSetupCallback dispatches inline-button presses from the /setup
+// keyboard. Three payload shapes:
+//
+//	s|<dayKey>|<idx>   toggle pick — updates session + edits keyboard in place
+//	sp|<dayKey>        save-persistent: commit this weekday to user_plan.yaml
+//	so|<dayKey>        save-once: commit this weekday as a YYYY-MM-DD override
+//
+// The session (setup_session.json) is the source of truth between taps; the
+// save buttons read it, write to the appropriate file, and send a confirmation
+// message. The session is NOT deleted on a single-day save, so the user can
+// keep editing other days in the same /setup flow.
 func handleSetupCallback(ctx context.Context, hc *http.Client, base string, cq *tgCallbackQuery) error {
 	data := strings.TrimSpace(cq.Data)
-	if !strings.HasPrefix(data, "s|") {
+	switch {
+	case strings.HasPrefix(data, "s|"):
+		return handleSetupToggle(ctx, hc, base, cq, data)
+	case strings.HasPrefix(data, "sp|"):
+		return handleSetupSavePersistent(ctx, hc, base, cq, data)
+	case strings.HasPrefix(data, "so|"):
+		return handleSetupSaveOnce(ctx, hc, base, cq, data)
+	default:
 		return tgAnswerCallback(ctx, hc, base, cq.ID, "ignored")
 	}
+}
+
+// handleSetupToggle — "s|<dayKey>|<idx>" — flips a candidate in/out of Picks.
+func handleSetupToggle(ctx context.Context, hc *http.Client, base string, cq *tgCallbackQuery, data string) error {
 	parts := strings.Split(data, "|")
 	if len(parts) != 3 {
 		return tgAnswerCallback(ctx, hc, base, cq.ID, "bad payload")
@@ -192,7 +242,12 @@ func handleSetupCallback(ctx context.Context, hc *http.Client, base string, cq *
 	}
 	if cq.Message != nil {
 		row := s.Candidates[dayKey]
-		kb, err := buildSetupInlineKeyboard(dayKey, row, s.Picks[dayKey])
+		cfg, _ := loadValidatedForCallback()
+		dateLabel := ""
+		if cfg != nil {
+			dateLabel = nextWeekdayDateLabel(dayKey, cfg)
+		}
+		kb, err := buildSetupInlineKeyboard(dayKey, row, s.Picks[dayKey], dateLabel)
 		if err == nil {
 			if err := tgEditMessageReplyMarkup(ctx, hc, base, cq.Message.Chat.ID, cq.Message.MessageID, kb); err != nil {
 				fmt.Printf("[telegram-bot] editMessageReplyMarkup: %v\n", err)
@@ -200,6 +255,67 @@ func handleSetupCallback(ctx context.Context, hc *http.Client, base string, cq *
 		}
 	}
 	return tgAnswerCallback(ctx, hc, base, cq.ID, action)
+}
+
+// handleSetupSavePersistent — "sp|<dayKey>" — writes just that weekday to
+// user_plan.yaml without disturbing other weekdays' entries. Session is
+// preserved so the user can keep editing.
+func handleSetupSavePersistent(ctx context.Context, hc *http.Client, base string, cq *tgCallbackQuery, data string) error {
+	parts := strings.SplitN(data, "|", 2)
+	if len(parts) != 2 {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "bad payload")
+	}
+	dayKey := strings.ToLower(parts[1])
+	s, err := readSetupSession()
+	if err != nil || s == nil {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "no session; run /setup")
+	}
+	summary, serr := savePersistentForDay(cfgPath, dayKey, s)
+	if serr != nil {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "save failed: "+serr.Error())
+	}
+	// Short callback ack (Telegram caps to ~200 chars) + a detailed reply.
+	_ = tgAnswerCallback(ctx, hc, base, cq.ID, "✓ saved every "+prettyDayKey(dayKey))
+	if cq.Message != nil {
+		body := "*Saved: recurring*\n" + notify.EscapeMarkdownV2(summary) +
+			"\n" + notify.EscapeMarkdownV2("Written to "+userPlanOverlayPath()+
+				". Applies every future "+prettyDayKey(dayKey)+" until you change it.")
+		return tgSendMessage(ctx, hc, base, cq.Message.Chat.ID, body, 0)
+	}
+	return nil
+}
+
+// handleSetupSaveOnce — "so|<dayKey>" — writes a one-time override for the
+// next occurrence of that weekday. Recurring plan is not touched.
+func handleSetupSaveOnce(ctx context.Context, hc *http.Client, base string, cq *tgCallbackQuery, data string) error {
+	parts := strings.SplitN(data, "|", 2)
+	if len(parts) != 2 {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "bad payload")
+	}
+	dayKey := strings.ToLower(parts[1])
+	s, err := readSetupSession()
+	if err != nil || s == nil {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "no session; run /setup")
+	}
+	summary, isoDate, serr := saveOneTimeForDay(cfgPath, dayKey, s)
+	if serr != nil {
+		return tgAnswerCallback(ctx, hc, base, cq.ID, "save failed: "+serr.Error())
+	}
+	_ = tgAnswerCallback(ctx, hc, base, cq.ID, "✓ saved just "+isoDate)
+	if cq.Message != nil {
+		body := "*Saved: one-time override*\n" + notify.EscapeMarkdownV2(summary) +
+			"\n" + notify.EscapeMarkdownV2("Applies only on "+isoDate+". Written to "+
+				oneTimeOverridesPath()+". Recurring plan in user_plan.yaml is untouched.")
+		return tgSendMessage(ctx, hc, base, cq.Message.Chat.ID, body, 0)
+	}
+	return nil
+}
+
+// loadValidatedForCallback is a tolerant loader used when we only need the
+// timezone for a date-label lookup. Returns nil on any error rather than
+// propagating — the caller falls back to a date-less keyboard.
+func loadValidatedForCallback() (*config.Config, error) {
+	return loadValidated()
 }
 
 func handleSetupDone(ctx context.Context, hc *http.Client, base string, chatID, replyTo int64) error {
