@@ -183,15 +183,22 @@ Designed to be a container CMD or a systemd ExecStart.`,
 // results + the upcoming-bookings list were dropped (you can pull those
 // any time with /selftest or /status, no need to push them weekly).
 //
+// Three independent gates, all must allow the send:
+//
+//  1. Today must be Thursday in cfg's timezone.
+//  2. We must not have already sent a heartbeat today (lastDay dedup).
+//  3. The user must not have explicitly disabled heartbeats from Telegram
+//     (/heartbeat off → heartbeat.json with Enabled=false).
+//
 // Why Thursday only: a daily heartbeat became noise once the daemon had
 // been running stable for a while. One ping a week is enough to confirm
 // "yes, the bot is awake," and Thursday is mid-week so a week-long outage
 // hits before the weekend training ramps up.
 //
-// Pause detection: when the daemon is paused at heartbeat time, the
+// Pause-detection note: when the daemon is paused at heartbeat time, the
 // summary string already begins with "paused · …" — we still send it so
 // the user knows the bot is alive AND aware that it's paused. Only the
-// gating (Thursday + once-per-day) changes.
+// gating (Thursday + once-per-day + user preference) changes.
 func maybeDailyHeartbeat(
 	n notify.Notifier,
 	loc *time.Location,
@@ -204,6 +211,12 @@ func maybeDailyHeartbeat(
 	}
 	day := now.Format("2006-01-02")
 	if day == *lastDay {
+		return
+	}
+	// User opt-out via /heartbeat off. We still bump lastDay so a later
+	// /heartbeat on doesn't suddenly burst-send a backlog of skipped days.
+	if hb, err := readHeartbeatState(); err == nil && !hb.IsEnabled() {
+		*lastDay = day
 		return
 	}
 	*lastDay = day

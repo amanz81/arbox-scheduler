@@ -58,3 +58,12 @@ func oneTimeOverridesPath() string {
 	}
 	return filepath.Join(dataDir(), "one_time_overrides.yaml")
 }
+
+// heartbeatStatePath is the JSON file that records whether the Thursday
+// heartbeat is enabled. Set via ARBOX_HEARTBEAT_STATE for tests.
+func heartbeatStatePath() string {
+	if v := os.Getenv("ARBOX_HEARTBEAT_STATE"); v != "" {
+		return v
+	}
+	return filepath.Join(dataDir(), "heartbeat.json")
+}
