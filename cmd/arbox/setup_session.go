@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

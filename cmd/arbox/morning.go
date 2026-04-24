@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // parseMorningArgs accepts up to two args in any order:

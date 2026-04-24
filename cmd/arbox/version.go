@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // buildVersionReport returns a short multi-line string for /version.

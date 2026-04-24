@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // TestNextOptions_OneTimeOverrideTakesPrecedence pins the key behavior:

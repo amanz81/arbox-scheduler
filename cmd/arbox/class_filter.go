@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // classPassesGlobalFilter applies the config-level category_filter only

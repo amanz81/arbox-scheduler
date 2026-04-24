@@ -1,4 +1,4 @@
-module github.com/amanz81/arbox-scheduler
+module github.com/lafofo-nivo/arbox-scheduler
 
 go 1.25.0
 

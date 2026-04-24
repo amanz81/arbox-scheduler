@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/config"
-	"github.com/amanz81/arbox-scheduler/internal/notify"
-	"github.com/amanz81/arbox-scheduler/internal/schedule"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/notify"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/schedule"
 )
 
 // Version is overridden at build time via `-ldflags "-X main.Version=vX.Y"`.

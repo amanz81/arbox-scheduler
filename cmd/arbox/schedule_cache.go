@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
 )
 
 // scheduleCacheTTL controls how long a single (day, locations_box_id) Arbox

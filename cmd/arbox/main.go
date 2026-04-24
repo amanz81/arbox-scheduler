@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
-	"github.com/amanz81/arbox-scheduler/internal/envfile"
-	"github.com/amanz81/arbox-scheduler/internal/schedule"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/envfile"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/schedule"
 )
 
 var cfgPath string

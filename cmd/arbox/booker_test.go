@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/schedule"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/schedule"
 )
 
 // TestGroupOptionsBySlot_sortsByStart: priority fallback was removed; each

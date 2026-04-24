@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/config"
-	"github.com/amanz81/arbox-scheduler/internal/notify"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/notify"
 )
 
 type captureNotifier struct {
