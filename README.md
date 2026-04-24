@@ -59,8 +59,9 @@ The daemon:
    **bursts up to 45 s of attempts at 1-second intervals** until the slot is
    booked or waitlisted.
 3. Sends every outcome to your Telegram chat (booked / waitlisted / failed).
-4. Once a day, sends a **heartbeat** with self-test results + the next 3
-   bookings it plans to do.
+4. Once a week (Thursdays), sends a one-line **heartbeat** so you know
+   the daemon is still alive. Run `/selftest` or `/status` any time you
+   want the full picture on demand.
 
 You can pause it (`/pause 3d`), check live availability (`/morning`,
 `/evening`), edit your plan from buttons (`/setup`), and inspect the deploy
@@ -289,7 +290,7 @@ no restart needed.
 Notifications you'll receive automatically:
 
 - `🟢 *Online*` — daemon boot
-- `🫀 *Heartbeat*` — once per local calendar day with self-test + upcoming bookings
+- `🫀 *Heartbeat*` — one-liner "alive · next window …", sent on Thursdays only (use `/selftest` or `/status` for details on demand)
 - `✅ *Booked*` / `⏳ *Waitlisted*` / `❌ *Booking failed*` — every booking attempt
 - `🔴 *Shutting down*` — on SIGTERM (systemd restart, container stop, etc.)
 - `⚠️ *Daemon error*` — for tick or booker errors
