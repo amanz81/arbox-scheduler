@@ -16,7 +16,7 @@ Requirements:
 - An Arbox member account (for live-testing against the API)
 
 ```bash
-git clone https://github.com/amanz81/arbox-scheduler.git
+git clone https://github.com/lafofo-nivo/arbox-scheduler.git
 cd arbox-scheduler
 cp .env.example .env        # fill in ARBOX_EMAIL + ARBOX_PASSWORD
 go build -o bin/arbox ./cmd/arbox

@@ -4,7 +4,7 @@ description: arbox-scheduler — Go daemon that auto-books CrossFit/Arbox classe
 
 # arbox-scheduler — orientation for LLMs
 
-This skill loads when you work inside the `amanz81/arbox-scheduler`
+This skill loads when you work inside the `lafofo-nivo/arbox-scheduler`
 repo. Use it to avoid relearning the architecture every session.
 
 ## What this project is

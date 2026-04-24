@@ -20,7 +20,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // savePersistentForDay commits s.Picks[dayKey] to user_plan.yaml without

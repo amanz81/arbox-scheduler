@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
 )
 
 // TestScheduleCache_DedupsRepeatedFetches verifies that two cached calls for

@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/config"
-	"github.com/amanz81/arbox-scheduler/internal/schedule"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/schedule"
 )
 
 // newSelfTestCmd is `arbox selftest`: prints health checks for the local

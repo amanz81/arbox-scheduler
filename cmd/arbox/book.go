@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/envfile"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/envfile"
 )
 
 // newBookCmd is the `arbox book` sub-tree.

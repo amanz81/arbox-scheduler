@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
 )
 
 // TestWriteUserBookingsSection_SurfacesWaitlistPosition is the regression guard

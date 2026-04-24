@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/amanz81/arbox-scheduler/internal/arboxapi"
-	"github.com/amanz81/arbox-scheduler/internal/envfile"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/arboxapi"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/envfile"
 )
 
 func newClassesCmd() *cobra.Command {

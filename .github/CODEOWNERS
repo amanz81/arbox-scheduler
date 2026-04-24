@@ -3,18 +3,17 @@
 #
 # Important: GitHub *never* lets PR authors approve their own PRs, no
 # matter what CODEOWNERS says. This file only matters when SOMEONE ELSE
-# opens a PR — they'll get @amanz81 added as a requested reviewer.
+# opens a PR — they'll get @lafofo-nivo added as a requested reviewer.
 # If you're solo, this file is mostly forward-looking documentation.
 #
 # Repository-wide owner: any unmatched path falls through to this rule.
-*                          @amanz81
+*                          @lafofo-nivo
 
 # Sensitive areas — explicit ownership so a reviewer is always pulled in
 # even if a future ruleset is loosened.
-/cmd/arbox/                 @amanz81
-/internal/                  @amanz81
-/.github/                   @amanz81
-/Dockerfile                 @amanz81
-/fly.toml                   @amanz81
-/config.yaml                @amanz81
-/.env.example               @amanz81
+/cmd/arbox/                 @lafofo-nivo
+/internal/                  @lafofo-nivo
+/.github/                   @lafofo-nivo
+/Dockerfile                 @lafofo-nivo
+/config.yaml                @lafofo-nivo
+/.env.example               @lafofo-nivo

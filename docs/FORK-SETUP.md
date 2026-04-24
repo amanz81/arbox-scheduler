@@ -67,7 +67,7 @@ anything unless you've explicitly disabled it.
 ## 2. Clone (or fork) the repo
 
 ```bash
-git clone https://github.com/amanz81/arbox-scheduler.git
+git clone https://github.com/lafofo-nivo/arbox-scheduler.git
 cd arbox-scheduler
 ```
 

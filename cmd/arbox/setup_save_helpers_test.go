@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/amanz81/arbox-scheduler/internal/config"
+	"github.com/lafofo-nivo/arbox-scheduler/internal/config"
 )
 
 // mkSetupSession makes a minimal setupSession with one Sunday candidate the
