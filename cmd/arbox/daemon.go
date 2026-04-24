@@ -147,8 +147,7 @@ Designed to be a container CMD or a systemd ExecStart.`,
 							nowTick.Format("2006-01-02 15:04:05 MST"),
 							ps.Summary(nowTick, loc))
 						maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay,
-							"paused · "+ps.Summary(nowTick, loc),
-							cfg, client, locID, lookaheadDays)
+							"paused · "+ps.Summary(nowTick, loc))
 						continue
 					}
 					summary, err := tick(ctx, cfg, client, locID, lookaheadDays)
@@ -167,7 +166,7 @@ Designed to be a container CMD or a systemd ExecStart.`,
 						fmt.Printf("[booker]\n%s\n", bookSummary)
 						summary = strings.TrimSpace(summary + "\n" + bookSummary)
 					}
-					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary, cfg, client, locID, lookaheadDays)
+					maybeDailyHeartbeat(notifier, loc, &lastHeartbeatDay, summary)
 				}
 			}
 		},
@@ -179,45 +178,41 @@ Designed to be a container CMD or a systemd ExecStart.`,
 	return cmd
 }
 
-// maybeDailyHeartbeat sends at most one EventHeartbeat per local calendar day.
-// Heartbeat body now includes:
-//   * the tick summary (alive · next window …)
-//   * /selftest results (✓/✗ per check)
-//   * next 3 planned bookings (date · category list · window · time-to-window)
+// maybeDailyHeartbeat sends at most one EventHeartbeat per Thursday in the
+// configured timezone. Body is just the one-line tick summary — selftest
+// results + the upcoming-bookings list were dropped (you can pull those
+// any time with /selftest or /status, no need to push them weekly).
+//
+// Why Thursday only: a daily heartbeat became noise once the daemon had
+// been running stable for a while. One ping a week is enough to confirm
+// "yes, the bot is awake," and Thursday is mid-week so a week-long outage
+// hits before the weekend training ramps up.
+//
+// Pause detection: when the daemon is paused at heartbeat time, the
+// summary string already begins with "paused · …" — we still send it so
+// the user knows the bot is alive AND aware that it's paused. Only the
+// gating (Thursday + once-per-day) changes.
 func maybeDailyHeartbeat(
 	n notify.Notifier,
 	loc *time.Location,
 	lastDay *string,
 	summary string,
-	cfg *config.Config,
-	client *arboxapi.Client,
-	locID, days int,
 ) {
 	now := time.Now().In(loc)
+	if now.Weekday() != time.Thursday {
+		return
+	}
 	day := now.Format("2006-01-02")
 	if day == *lastDay {
 		return
 	}
 	*lastDay = day
 	if summary == "" {
-		summary = "no summary"
+		summary = "alive · no tick summary available"
 	}
-	body := summary
-
-	// Self-test (best-effort; we still send the heartbeat if it errors).
-	if checks := runSelfTest(context.Background(), cfg, client, locID, days); len(checks) > 0 {
-		body += "\n\n" + formatSelfTestReport(checks)
-	}
-	if next := nextPlannedBookingsSummary(cfg, days, 3); len(next) > 0 {
-		body += "\nNext scheduled bookings:\n"
-		for _, l := range next {
-			body += "  · " + l + "\n"
-		}
-	}
-
 	_ = n.Notify(notify.Message{
 		Event: notify.EventHeartbeat,
-		Text:  body,
+		Text:  summary,
 		When:  now,
 	})
 }
