@@ -286,11 +286,12 @@ no restart needed.
 | `/resume` | Resume auto-booking |
 | `/version` | Build rev + gym + TZ + locations_box_id + pause state |
 | `/selftest` | 8 health checks + next 3 scheduled bookings |
+| `/heartbeat [on\|off]` | Show or toggle the Thursday heartbeat (`on` resumes, `off` mutes) |
 
 Notifications you'll receive automatically:
 
 - `🟢 *Online*` — daemon boot
-- `🫀 *Heartbeat*` — one-liner "alive · next window …", sent on Thursdays only (use `/selftest` or `/status` for details on demand)
+- `🫀 *Heartbeat*` — one-liner "alive · next window …", sent on Thursdays only by default. Toggle with `/heartbeat on|off` from Telegram (use `/selftest` or `/status` for details on demand).
 - `✅ *Booked*` / `⏳ *Waitlisted*` / `❌ *Booking failed*` — every booking attempt
 - `🔴 *Shutting down*` — on SIGTERM (systemd restart, container stop, etc.)
 - `⚠️ *Daemon error*` — for tick or booker errors

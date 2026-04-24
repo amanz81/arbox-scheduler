@@ -182,6 +182,10 @@ func runTelegramCommandBot(ctx context.Context, token string, allowedChatID int6
 					}
 				}
 				_ = tgSendChunkedReport(ctx, hc, base, msg.Chat.ID, msg.MessageID, "Self-test", body)
+			case "/heartbeat":
+				body := handleHeartbeatCommand(args)
+				_ = tgSendMessage(ctx, hc, base, msg.Chat.ID,
+					"*Heartbeat*\n"+notify.EscapeMarkdownV2(body), msg.MessageID)
 			case "/morning":
 				startH, endH, days, parseErr := parseMorningArgs(args, 6, 12, 1)
 				if parseErr != nil {
@@ -282,6 +286,7 @@ var telegramCommandList = []telegramCommand{
 	{"resume", "Resume auto-booking"},
 	{"version", "Show deployed version + gym + TZ"},
 	{"selftest", "Health check + next scheduled bookings"},
+	{"heartbeat", "Show / toggle the Thursday heartbeat (on|off)"},
 	{"setup", "Pick week from real Arbox classes"},
 	{"setupdone", "Save picks to user_plan.yaml"},
 	{"setupcancel", "Abort /setup wizard"},
