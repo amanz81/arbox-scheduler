@@ -169,6 +169,90 @@ func alreadyHoldsAtStart(classes []arboxapi.Class, start time.Time, loc *time.Lo
 	return false
 }
 
+// failoverHallTokens returns the preferred hall token and its counterpart
+// ("hall a" / "hall b") for a planned option's category, or ("", "") when
+// hall failover does not apply. Failover is scoped to CrossFit hall slots:
+// the category must name a CrossFit class in a specific hall. That keeps
+// e.g. "Weightlifting Hall B" out — it has no counterpart hall to swap to.
+func failoverHallTokens(category string) (mine, other string) {
+	cat := strings.ToLower(strings.TrimSpace(category))
+	if !strings.Contains(cat, "crossfit") {
+		return "", ""
+	}
+	switch {
+	case strings.Contains(cat, "hall a"):
+		return "hall a", "hall b"
+	case strings.Contains(cat, "hall b"):
+		return "hall b", "hall a"
+	}
+	return "", ""
+}
+
+// failoverClass finds the OTHER CrossFit hall's class at the option's time
+// in the day's class list: a CrossFit class whose category carries the
+// opposite hall token (and not the preferred one). The counterpart is
+// derived from the actual classes on offer rather than by rewriting the
+// configured category string, so gym-side spelling differences ("CrossFit-
+// Hall A" vs "Crossfit Hall B") don't matter. Global excludes are honored
+// exactly as resolveOption honors them. Returns nil when failover does not
+// apply or no such class exists.
+func failoverClass(opt schedule.PlannedOption, day []arboxapi.Class, flt config.CategoryFilter) *arboxapi.Class {
+	mine, other := failoverHallTokens(opt.Category)
+	if other == "" {
+		return nil
+	}
+	wantTime := hhmm(opt.Time)
+	for i := range day {
+		c := day[i]
+		if hhmm(c.Time) != wantTime {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(c.ResolvedCategoryName()))
+		if !strings.Contains(name, "crossfit") ||
+			!strings.Contains(name, other) ||
+			strings.Contains(name, mine) {
+			continue
+		}
+		skip := false
+		for _, ex := range flt.Exclude {
+			if ex != "" && strings.Contains(name, strings.ToLower(ex)) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		return &day[i]
+	}
+	return nil
+}
+
+// slotCandidateClasses returns the ordered classes runBooker should act on
+// for one planned option: the preferred class first (resolveOption's first
+// match), then the other CrossFit hall's class at the same time as a
+// failover candidate. Either may be absent; the failover entry is dropped
+// when it resolves to the same class as the preferred one.
+func slotCandidateClasses(opt schedule.PlannedOption, day []arboxapi.Class, flt config.CategoryFilter) []arboxapi.Class {
+	var out []arboxapi.Class
+	if matches := resolveOption(opt, day, flt); len(matches) > 0 {
+		out = append(out, matches[0])
+	}
+	if fc := failoverClass(opt, day, flt); fc != nil {
+		dup := false
+		for _, c := range out {
+			if c.ID == fc.ID {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, *fc)
+		}
+	}
+	return out
+}
+
 // runBooker tries to book every PlannedOption whose booking window has opened
 // but whose class hasn't started yet. It respects a persisted attempts file so
 // each schedule_id is only acted on once.
@@ -257,15 +341,20 @@ func runBooker(
 			continue
 		}
 
-		// Try options in priority order. Stop after the first terminal
-		// outcome (success, waitlisted, or terminal failure).
+		// Candidates in priority order: the planned class first, then the
+		// other CrossFit hall's class at the same time (hall failover — see
+		// slotCandidateClasses). Booking is attempted on every candidate
+		// before any waitlist join, so a real spot in the other hall always
+		// beats a waitlist spot in the preferred hall. If no candidate
+		// books, we waitlist the first candidate that had a class at all
+		// (the preferred class, or the other hall's when the preferred
+		// class doesn't exist) so the user is never left with nothing.
+		candidates := slotCandidateClasses(slot.Options[0], dayClasses, cfg.CategoryFilter)
 		acted := false
-		for _, opt := range slot.Options {
-			matches := resolveOption(opt, dayClasses, cfg.CategoryFilter)
-			if len(matches) == 0 {
-				continue
-			}
-			cl := matches[0]
+		var waitlistTarget *arboxapi.Class
+		var waitlistLabel string
+		waitlistWasFull := false
+		for _, cl := range candidates {
 			if cl.YouStatus() != "" {
 				summaryLines = append(summaryLines,
 					fmt.Sprintf("%s %s %s (id %d) — already %s",
@@ -308,36 +397,53 @@ func runBooker(
 				stateDirty = true
 				summaryLines = append(summaryLines, line)
 				notifyBookingResult(notifier, cl, attempt, slot.ClassStart)
-				acted = (attempt.Result == resultBooked)
-				if acted {
+				if attempt.Result == resultBooked {
+					acted = true
 					break
 				}
-				// Booking failed (full / API error). Try waitlist as last resort.
-				wl := tryWaitlistOnce(ctx, client, mid, cl, slotLabel, now)
-				state.Attempts[cl.ID] = wl
-				summaryLines = append(summaryLines,
-					fmt.Sprintf("%s — waitlist %s", slotLabel, wl.Result))
-				notifyBookingResult(notifier, cl, wl, slot.ClassStart)
-				acted = wl.Result == resultWaitlisted
-				if acted {
-					break
+				// Booking failed (race filled it / API error). Remember
+				// this class for the waitlist fallback below, but first let
+				// any remaining candidate try to book a real spot.
+				if waitlistTarget == nil {
+					c := cl
+					waitlistTarget = &c
+					waitlistLabel = slotLabel
+					waitlistWasFull = false
 				}
-				// Try next priority option.
 				continue
 			}
 
-			// Class is full: go straight to waitlist.
-			wl := tryWaitlistOnce(ctx, client, mid, cl, slotLabel, now)
+			// Class is full: remember it for the waitlist fallback and move
+			// on — the other hall may still have a bookable spot.
+			if waitlistTarget == nil {
+				c := cl
+				waitlistTarget = &c
+				waitlistLabel = slotLabel
+				waitlistWasFull = true
+			}
+		}
+
+		// No candidate booked: join the waitlist of the first candidate
+		// that had a class (preferred hall if it exists, else the other
+		// hall) — the pre-failover behavior for a lone class.
+		if !acted && waitlistTarget != nil {
+			cl := *waitlistTarget
+			mid, err := resolveMember()
+			if err != nil {
+				return "", fmt.Errorf("membership: %w", err)
+			}
+			wl := tryWaitlistOnce(ctx, client, mid, cl, waitlistLabel, now)
 			state.Attempts[cl.ID] = wl
 			stateDirty = true
-			summaryLines = append(summaryLines,
-				fmt.Sprintf("%s — full → waitlist %s", slotLabel, wl.Result))
-			notifyBookingResult(notifier, cl, wl, slot.ClassStart)
-			if wl.Result == resultWaitlisted {
-				acted = true
-				break
+			if waitlistWasFull {
+				summaryLines = append(summaryLines,
+					fmt.Sprintf("%s — full → waitlist %s", waitlistLabel, wl.Result))
+			} else {
+				summaryLines = append(summaryLines,
+					fmt.Sprintf("%s — waitlist %s", waitlistLabel, wl.Result))
 			}
-			// Else try the next priority option.
+			notifyBookingResult(notifier, cl, wl, slot.ClassStart)
+			acted = wl.Result == resultWaitlisted
 		}
 
 		if !acted {
